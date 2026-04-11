@@ -1,12 +1,19 @@
 import { Router, Request, Response } from 'express'
+import rateLimit from 'express-rate-limit'
 import { authenticateUser } from '../services/authService'
 
 export const authRouter = Router()
 
-authRouter.post('/telegram', async (req: Request, res: Response) => {
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: { error: 'Too many auth attempts, try again later' },
+})
+
+authRouter.post('/telegram', authLimiter, async (req: Request, res: Response) => {
   try {
     const { initData } = req.body
-    if (!initData) {
+    if (!initData || typeof initData !== 'string') {
       res.status(400).json({ error: 'initData required' })
       return
     }
@@ -22,8 +29,7 @@ authRouter.post('/telegram', async (req: Request, res: Response) => {
         settings: result.user.settings,
       },
     })
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Auth failed'
-    res.status(401).json({ error: message })
+  } catch {
+    res.status(401).json({ error: 'Authentication failed' })
   }
 })
