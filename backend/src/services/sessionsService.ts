@@ -32,7 +32,7 @@ export async function startSession(userId: string, presetId: string) {
     data: {
       userId,
       presetId: preset.id,
-      presetSnapshot: snapshot,
+      presetSnapshot: JSON.parse(JSON.stringify(snapshot)),
       startedAt: new Date(),
       plannedCycles: preset.cyclesCount,
       status: 'COMPLETED',
