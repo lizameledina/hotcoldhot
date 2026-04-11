@@ -64,14 +64,20 @@ export function ResultScreen() {
     <div className="screen fade-in" style={{ display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
       {/* Status */}
       <div style={{ textAlign: 'center', padding: '32px 0 24px' }}>
-        <div style={{ fontSize: 64, marginBottom: 12 }}>{statusEmoji}</div>
-        <h1 style={{ fontSize: 32, fontWeight: 800, color: statusColor, marginBottom: 8 }}>
-          {statusLabel}
-        </h1>
-        {session && (
-          <p style={{ color: 'var(--text-secondary)', fontSize: 15 }}>
-            {(session.presetSnapshot as { name?: string })?.name}
-          </p>
+        {loading ? (
+          <div style={{ fontSize: 64, marginBottom: 12 }} className="pulse">🚿</div>
+        ) : (
+          <>
+            <div style={{ fontSize: 64, marginBottom: 12 }}>{statusEmoji}</div>
+            <h1 style={{ fontSize: 32, fontWeight: 800, color: statusColor, marginBottom: 8 }}>
+              {statusLabel}
+            </h1>
+            {session && (
+              <p style={{ color: 'var(--text-secondary)', fontSize: 15 }}>
+                {(session.presetSnapshot as { name?: string })?.name}
+              </p>
+            )}
+          </>
         )}
       </div>
 

@@ -19,12 +19,19 @@ interface SessionStore {
   setResultSessionId: (id: string | null) => void
 }
 
-function getNextPhase(current: Phase, preset: Preset): Phase | null {
-  if (current === 'hot') return 'cold'
-  if (current === 'cold') {
-    return preset.breakDurationSec > 0 ? 'break' : null
+// Phase sequence per cycle: hot → (break) → cold
+// Between cycles: cold → (break) → hot
+// After last cold: session ends (no trailing break)
+function getNextPhase(current: Phase, prevPhase: Phase | null, preset: Preset): Phase | null {
+  if (current === 'hot') {
+    return preset.breakDurationSec > 0 ? 'break' : 'cold'
   }
-  return null // break -> end of cycle
+  if (current === 'break') {
+    // break after hot → go to cold; break after cold → go to hot (new cycle)
+    return prevPhase === 'hot' ? 'cold' : 'hot'
+  }
+  // cold: cycle-end logic is handled in tick/skipPhase
+  return null
 }
 
 function getPhaseDuration(phase: Phase, preset: Preset): number {
@@ -53,6 +60,7 @@ export const useSessionStore = create<SessionStore>()(
           preset,
           startedAt: now,
           currentPhase: 'hot',
+          prevPhase: null,
           currentCycle: 1,
           phaseStartedAt: now,
           isPaused: false,
@@ -91,17 +99,25 @@ export const useSessionStore = create<SessionStore>()(
         // Phase completed naturally
         const phaseElapsed = getPhaseDuration(s.currentPhase, s.preset)
         const accumulated = accumulatePhaseTime(s, phaseElapsed)
-
-        const nextPhase = getNextPhase(s.currentPhase, s.preset)
         const now = Date.now()
 
-        if (nextPhase !== null) {
-          // Move to next phase within same cycle
+        // cold = end of cycle
+        if (s.currentPhase === 'cold') {
+          const newCompleted = s.completedCycles + 1
+          if (newCompleted >= s.preset.cyclesCount) {
+            // Session complete — no trailing break
+            set({ active: { ...s, ...accumulated, completedCycles: newCompleted } })
+            return { phaseCompleted: true, sessionCompleted: true }
+          }
+          // Between cycles: break → hot (or directly hot if no break)
+          const nextPhase: Phase = s.preset.breakDurationSec > 0 ? 'break' : 'hot'
           set({
             active: {
-              ...s,
-              ...accumulated,
+              ...s, ...accumulated,
+              completedCycles: newCompleted,
+              currentCycle: s.currentCycle + 1,
               currentPhase: nextPhase,
+              prevPhase: 'cold',
               phaseStartedAt: now,
               pausedRemainingMs: null,
               pausedAt: null,
@@ -110,34 +126,23 @@ export const useSessionStore = create<SessionStore>()(
           return { phaseCompleted: true, sessionCompleted: false }
         }
 
-        // End of cycle
-        const newCompleted = s.completedCycles + 1
-        if (newCompleted >= s.preset.cyclesCount) {
-          // Session complete!
+        // hot or break: use getNextPhase
+        const nextPhase = getNextPhase(s.currentPhase, s.prevPhase, s.preset)
+        if (nextPhase !== null) {
           set({
             active: {
-              ...s,
-              ...accumulated,
-              completedCycles: newCompleted,
+              ...s, ...accumulated,
+              currentPhase: nextPhase,
+              prevPhase: s.currentPhase,
+              phaseStartedAt: now,
+              pausedRemainingMs: null,
+              pausedAt: null,
             },
           })
-          return { phaseCompleted: true, sessionCompleted: true }
+          return { phaseCompleted: true, sessionCompleted: false }
         }
 
-        // Next cycle
-        set({
-          active: {
-            ...s,
-            ...accumulated,
-            completedCycles: newCompleted,
-            currentCycle: s.currentCycle + 1,
-            currentPhase: 'hot',
-            phaseStartedAt: now,
-            pausedRemainingMs: null,
-            pausedAt: null,
-          },
-        })
-        return { phaseCompleted: true, sessionCompleted: false }
+        return { phaseCompleted: false, sessionCompleted: false }
       },
 
       pause: () => {
@@ -176,7 +181,6 @@ export const useSessionStore = create<SessionStore>()(
         const s = get().active
         if (!s) return { sessionCompleted: false }
 
-        // Accumulate time actually spent in this phase
         let elapsed: number
         if (s.isPaused) {
           const total = getPhaseDuration(s.currentPhase, s.preset)
@@ -186,16 +190,23 @@ export const useSessionStore = create<SessionStore>()(
         }
         elapsed = Math.min(elapsed, getPhaseDuration(s.currentPhase, s.preset))
         const accumulated = accumulatePhaseTime(s, elapsed)
-
-        const nextPhase = getNextPhase(s.currentPhase, s.preset)
         const now = Date.now()
 
-        if (nextPhase !== null) {
+        // cold = end of cycle
+        if (s.currentPhase === 'cold') {
+          const newCompleted = s.completedCycles + 1
+          if (newCompleted >= s.preset.cyclesCount) {
+            set({ active: { ...s, ...accumulated, completedCycles: newCompleted } })
+            return { sessionCompleted: true }
+          }
+          const nextPhase: Phase = s.preset.breakDurationSec > 0 ? 'break' : 'hot'
           set({
             active: {
-              ...s,
-              ...accumulated,
+              ...s, ...accumulated,
+              completedCycles: newCompleted,
+              currentCycle: s.currentCycle + 1,
               currentPhase: nextPhase,
+              prevPhase: 'cold',
               phaseStartedAt: now,
               isPaused: false,
               pausedAt: null,
@@ -205,26 +216,23 @@ export const useSessionStore = create<SessionStore>()(
           return { sessionCompleted: false }
         }
 
-        // End of cycle
-        const newCompleted = s.completedCycles + 1
-        if (newCompleted >= s.preset.cyclesCount) {
-          set({ active: { ...s, ...accumulated, completedCycles: newCompleted } })
-          return { sessionCompleted: true }
+        // hot or break
+        const nextPhase = getNextPhase(s.currentPhase, s.prevPhase, s.preset)
+        if (nextPhase !== null) {
+          set({
+            active: {
+              ...s, ...accumulated,
+              currentPhase: nextPhase,
+              prevPhase: s.currentPhase,
+              phaseStartedAt: now,
+              isPaused: false,
+              pausedAt: null,
+              pausedRemainingMs: null,
+            },
+          })
+          return { sessionCompleted: false }
         }
 
-        set({
-          active: {
-            ...s,
-            ...accumulated,
-            completedCycles: newCompleted,
-            currentCycle: s.currentCycle + 1,
-            currentPhase: 'hot',
-            phaseStartedAt: now,
-            isPaused: false,
-            pausedAt: null,
-            pausedRemainingMs: null,
-          },
-        })
         return { sessionCompleted: false }
       },
 

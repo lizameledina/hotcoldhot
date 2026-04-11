@@ -74,6 +74,7 @@ export interface ActiveSessionState {
   preset: Preset
   startedAt: number // ms timestamp
   currentPhase: Phase
+  prevPhase: Phase | null // needed to distinguish break-after-hot vs break-after-cold
   currentCycle: number // 1-indexed
   phaseStartedAt: number // ms timestamp
   isPaused: boolean
