@@ -3,6 +3,7 @@ import { useAuthStore } from '../store/authStore'
 import { usePresetsStore } from '../store/presetsStore'
 import { useNavigationStore } from '../store/navigationStore'
 import { useSessionStore } from '../store/sessionStore'
+import { useStatsStore } from '../store/statsStore'
 import type { Preset } from '../types'
 
 export function HomeScreen() {
@@ -10,10 +11,12 @@ export function HomeScreen() {
   const { system, user: userPresets, isLoading, lastPresetId, fetch, setLastPreset } = usePresetsStore()
   const { navigate } = useNavigationStore()
   const { active } = useSessionStore()
+  const { summary, fetch: fetchStats } = useStatsStore()
 
   useEffect(() => {
     fetch()
-  }, [fetch])
+    fetchStats()
+  }, [fetch, fetchStats])
 
   const allPresets = [...system, ...userPresets]
   const lastPreset = lastPresetId ? allPresets.find((p) => p.id === lastPresetId) : allPresets[0]
@@ -23,15 +26,69 @@ export function HomeScreen() {
     navigate('session')
   }
 
+  const streak = summary?.currentStreak ?? 0
+  const todayCompleted = summary?.todayCompleted ?? false
+
   return (
     <div className="screen fade-in" style={{ paddingTop: 24 }}>
       {/* Header */}
-      <div style={{ marginBottom: 28 }}>
+      <div style={{ marginBottom: 20 }}>
         <p style={{ color: 'var(--text-secondary)', fontSize: 14, marginBottom: 4 }}>Добро пожаловать</p>
         <h1 style={{ fontSize: 28, fontWeight: 800, letterSpacing: -0.5 }}>
           {user?.firstName ? `Привет, ${user.firstName}` : 'Контрастный душ'}
         </h1>
       </div>
+
+      {/* Streak + goal row */}
+      {summary && (
+        <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
+          {/* Streak */}
+          <div
+            className="card"
+            style={{
+              flex: 1,
+              padding: '14px 16px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+            }}
+          >
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 500 }}>Стрик</div>
+            <div style={{ fontSize: 20, fontWeight: 700 }}>
+              {streak > 0 ? `🔥 ${streak} ${pluralDays(streak)}` : '—'}
+            </div>
+            {streak > 0 && !todayCompleted && (
+              <div style={{ fontSize: 12, color: 'var(--color-hot)', marginTop: 2 }}>
+                Сделай сегодня, не потеряй
+              </div>
+            )}
+          </div>
+
+          {/* Today's goal */}
+          <div
+            className="card"
+            style={{
+              flex: 1,
+              padding: '14px 16px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+            }}
+          >
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 500 }}>Цель дня</div>
+            {todayCompleted ? (
+              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--color-cold)' }}>
+                Выполнена ✅
+              </div>
+            ) : (
+              <>
+                <div style={{ fontSize: 15, fontWeight: 600 }}>1 сессия</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>Не выполнено</div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Resume session banner */}
       {active && (
@@ -101,6 +158,12 @@ export function HomeScreen() {
       </div>
     </div>
   )
+}
+
+function pluralDays(n: number): string {
+  if (n % 10 === 1 && n % 100 !== 11) return 'день'
+  if (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20)) return 'дня'
+  return 'дней'
 }
 
 function PresetRow({ preset, isActive, onSelect }: { preset: Preset; isActive: boolean; onSelect: () => void }) {

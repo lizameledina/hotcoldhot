@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma'
 import { SessionStatus } from '@prisma/client'
+import { recalcAndStoreStreak } from './statsService'
 
 interface PresetSnapshot {
   name: string
@@ -60,7 +61,7 @@ export async function finishSession(
 
   const totalActualSec = data.actualHotSec + data.actualColdSec + data.actualBreakSec
 
-  return prisma.session.update({
+  const updated = await prisma.session.update({
     where: { id: sessionId },
     data: {
       status: data.status as SessionStatus,
@@ -72,6 +73,13 @@ export async function finishSession(
       totalActualSec,
     },
   })
+
+  // Recalculate and store streak on completed session
+  if (data.status === 'COMPLETED') {
+    await recalcAndStoreStreak(userId).catch(() => {}) // non-blocking
+  }
+
+  return updated
 }
 
 export async function getSessions(userId: string, page = 1, limit = 20) {

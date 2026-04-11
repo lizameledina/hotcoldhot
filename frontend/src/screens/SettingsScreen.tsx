@@ -12,8 +12,27 @@ const THEME_OPTIONS: { value: Theme; label: string }[] = [
 
 export function SettingsScreen() {
   const { goBack } = useNavigationStore()
-  const { soundEnabled, vibrationEnabled, theme, setSoundEnabled, setVibrationEnabled, setTheme } = useSettingsStore()
+  const {
+    soundEnabled,
+    vibrationEnabled,
+    theme,
+    reminderEnabled,
+    reminderTime,
+    setSoundEnabled,
+    setVibrationEnabled,
+    setTheme,
+    setReminderEnabled,
+    setReminderTime,
+  } = useSettingsStore()
   const { user } = useAuthStore()
+
+  function handleReminderToggle(v: boolean) {
+    if (v && !reminderTime) {
+      // Set a sensible default before enabling
+      setReminderTime('08:00')
+    }
+    setReminderEnabled(v)
+  }
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -67,6 +86,43 @@ export function SettingsScreen() {
             checked={vibrationEnabled}
             onChange={setVibrationEnabled}
           />
+        </div>
+
+        {/* Reminders */}
+        <SectionLabel>Напоминания</SectionLabel>
+        <div className="card" style={{ marginBottom: 16 }}>
+          <ToggleRow
+            label="Напоминания"
+            description="Ежедневное напоминание в Telegram"
+            checked={reminderEnabled}
+            onChange={handleReminderToggle}
+          />
+          {reminderEnabled && (
+            <>
+              <div className="divider" style={{ margin: '0 16px' }} />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px' }}>
+                <div>
+                  <div style={{ fontSize: 16, fontWeight: 500 }}>Время напоминания</div>
+                  <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 2 }}>По UTC</div>
+                </div>
+                <input
+                  type="time"
+                  value={reminderTime}
+                  onChange={(e) => setReminderTime(e.target.value)}
+                  style={{
+                    fontSize: 16,
+                    fontWeight: 600,
+                    color: 'var(--text-primary)',
+                    background: 'transparent',
+                    border: '1px solid var(--border)',
+                    borderRadius: 8,
+                    padding: '6px 10px',
+                    cursor: 'pointer',
+                  }}
+                />
+              </div>
+            </>
+          )}
         </div>
 
         {/* Theme */}

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useNavigationStore } from '../store/navigationStore'
 import { useSessionStore } from '../store/sessionStore'
-import { usePresetsStore } from '../store/presetsStore'
+import { useStatsStore } from '../store/statsStore'
 import { sessionsApi } from '../api'
 import type { Session } from '../types'
 
@@ -12,10 +12,16 @@ function formatDuration(sec: number): string {
   return s > 0 ? `${m} мин ${s} сек` : `${m} мин`
 }
 
+function pluralDays(n: number): string {
+  if (n % 10 === 1 && n % 100 !== 11) return 'день'
+  if (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20)) return 'дня'
+  return 'дней'
+}
+
 export function ResultScreen() {
   const { navigate } = useNavigationStore()
   const { resultSessionId, setResultSessionId } = useSessionStore()
-  const { lastPresetId, getById, setLastPreset } = usePresetsStore()
+  const { summary, fetch: fetchStats, invalidate } = useStatsStore()
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -29,6 +35,12 @@ export function ResultScreen() {
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [resultSessionId])
+
+  // Refresh stats when result screen opens (session just finished)
+  useEffect(() => {
+    invalidate()
+    fetchStats()
+  }, [])
 
   function handleRepeat() {
     setResultSessionId(null)
@@ -45,6 +57,9 @@ export function ResultScreen() {
   const statusLabel = isCompleted ? 'Завершено' : 'Прервано'
   const statusColor = isCompleted ? 'var(--color-cold)' : 'var(--color-break)'
 
+  const streak = summary?.currentStreak ?? 0
+  const todayCompleted = summary?.todayCompleted ?? false
+
   return (
     <div className="screen fade-in" style={{ display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
       {/* Status */}
@@ -59,6 +74,50 @@ export function ResultScreen() {
           </p>
         )}
       </div>
+
+      {/* Streak & goal badges (only for completed sessions) */}
+      {isCompleted && summary && (
+        <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
+          <div
+            className="card fade-in"
+            style={{
+              flex: 1,
+              padding: '12px 14px',
+              textAlign: 'center',
+              border: streak > 0 ? '1px solid rgba(255,107,53,0.3)' : '1px solid var(--border)',
+            }}
+          >
+            {streak > 0 ? (
+              <>
+                <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--color-hot)' }}>
+                  🔥 {streak} {pluralDays(streak)}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>Стрик</div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontSize: 18, fontWeight: 700 }}>🔥 Начало</div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>Новый стрик</div>
+              </>
+            )}
+          </div>
+
+          {todayCompleted && (
+            <div
+              className="card fade-in"
+              style={{
+                flex: 1,
+                padding: '12px 14px',
+                textAlign: 'center',
+                border: '1px solid rgba(74,158,255,0.3)',
+              }}
+            >
+              <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--color-cold)' }}>🎯</div>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>Цель дня выполнена</div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Stats */}
       {!loading && session && (

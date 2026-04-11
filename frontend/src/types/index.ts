@@ -6,6 +6,11 @@ export interface UserSettings {
   soundEnabled: boolean
   vibrationEnabled: boolean
   theme: Theme
+  currentStreak: number
+  bestStreak: number
+  lastCompletedDate: string | null
+  reminderEnabled: boolean
+  reminderTime: string | null
 }
 
 export interface User {
@@ -58,6 +63,7 @@ export interface StatsSummary {
   avgDurationSec: number
   currentStreak: number
   bestStreak: number
+  todayCompleted: boolean
 }
 
 // Timer / session state types

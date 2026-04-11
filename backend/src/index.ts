@@ -4,6 +4,7 @@ import cors from 'cors'
 import helmet from 'helmet'
 import rateLimit from 'express-rate-limit'
 import { router } from './routes'
+import { startReminderScheduler } from './scheduler/reminders'
 
 const app = express()
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 4000
@@ -47,4 +48,5 @@ app.get('/health', (_req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`)
+  startReminderScheduler()
 })
