@@ -7,6 +7,7 @@ interface PresetSnapshot {
   coldDurationSec: number
   breakDurationSec: number
   cyclesCount: number
+  [key: string]: unknown
 }
 
 export async function startSession(userId: string, presetId: string) {

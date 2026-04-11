@@ -22,10 +22,9 @@ export function validateTelegramInitData(initData: string): TelegramUser | null 
 
     params.delete('hash')
 
-    const dataCheckString = Array.from(params.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([k, v]) => `${k}=${v}`)
-      .join('\n')
+    const entries = Array.from(params.entries())
+    entries.sort((a, b) => a[0].localeCompare(b[0]))
+    const dataCheckString = entries.map((e) => `${e[0]}=${e[1]}`).join('\n')
 
     const secretKey = crypto
       .createHmac('sha256', 'WebAppData')
