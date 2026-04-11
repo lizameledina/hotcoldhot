@@ -6,7 +6,6 @@ export const authRouter = Router()
 authRouter.post('/telegram', async (req: Request, res: Response) => {
   try {
     const { initData } = req.body
-    console.log('[auth] initData length:', initData?.length, 'value start:', String(initData).slice(0, 50))
     if (!initData) {
       res.status(400).json({ error: 'initData required' })
       return

@@ -16,7 +16,6 @@ export function validateTelegramInitData(initData: string): TelegramUser | null 
   }
 
   try {
-    console.log('[auth] validating initData, BOT_TOKEN set:', !!process.env.TELEGRAM_BOT_TOKEN)
     const params = new URLSearchParams(initData)
     const hash = params.get('hash')
     if (!hash) return null
