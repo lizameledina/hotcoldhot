@@ -1,0 +1,85 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id         String   @id @default(cuid())
+  telegramId String   @unique
+  firstName  String
+  lastName   String?
+  username   String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  settings   UserSettings?
+  presets    Preset[]
+  sessions   Session[]
+}
+
+model UserSettings {
+  id          String  @id @default(cuid())
+  userId      String  @unique
+  soundEnabled Boolean @default(true)
+  vibrationEnabled Boolean @default(true)
+  theme       Theme   @default(SYSTEM)
+
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+enum Theme {
+  SYSTEM
+  LIGHT
+  DARK
+}
+
+model Preset {
+  id              String   @id @default(cuid())
+  userId          String?
+  name            String
+  hotDurationSec  Int
+  coldDurationSec Int
+  breakDurationSec Int     @default(0)
+  cyclesCount     Int
+  isSystem        Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions        Session[]
+
+  @@index([userId])
+  @@index([isSystem])
+}
+
+model Session {
+  id               String        @id @default(cuid())
+  userId           String
+  presetId         String?
+  presetSnapshot   Json
+  status           SessionStatus @default(COMPLETED)
+  startedAt        DateTime
+  endedAt          DateTime?
+  completedCycles  Int           @default(0)
+  plannedCycles    Int
+  actualHotSec     Int           @default(0)
+  actualColdSec    Int           @default(0)
+  actualBreakSec   Int           @default(0)
+  totalActualSec   Int           @default(0)
+  createdAt        DateTime      @default(now())
+
+  user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  preset           Preset?       @relation(fields: [presetId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([userId, startedAt])
+}
+
+enum SessionStatus {
+  COMPLETED
+  INTERRUPTED
+}
