@@ -4,15 +4,26 @@ import type { Session } from '../types'
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('ru-RU', {
-    day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
   })
 }
 
-function formatDur(sec: number): string {
+function formatDuration(sec: number): string {
   if (sec < 60) return `${sec} сек`
-  const m = Math.floor(sec / 60)
-  const s = sec % 60
-  return s > 0 ? `${m} мин ${s} сек` : `${m} мин`
+  const minutes = Math.floor(sec / 60)
+  const seconds = sec % 60
+  return seconds > 0 ? `${minutes} мин ${seconds} сек` : `${minutes} мин`
+}
+
+function feelingLabel(value: Session['feelingAfter']): string | null {
+  if (value === 'energized') return 'Бодро'
+  if (value === 'normal') return 'Нормально'
+  if (value === 'hard') return 'Тяжело'
+  return null
 }
 
 function StatRow({ label, value, color }: { label: string; value: string; color?: string }) {
@@ -33,9 +44,7 @@ export function SessionDetailScreen() {
     return null
   }
 
-  const snap = session.presetSnapshot as {
-    name?: string; hotDurationSec?: number; coldDurationSec?: number; breakDurationSec?: number; cyclesCount?: number
-  }
+  const snap = session.presetSnapshot
   const isCompleted = session.status === 'COMPLETED'
 
   return (
@@ -46,20 +55,14 @@ export function SessionDetailScreen() {
       </div>
 
       <div className="screen" style={{ paddingTop: 8 }}>
-        {/* Header */}
         <div className="card" style={{ padding: 20, marginBottom: 16, textAlign: 'center' }}>
-          <div style={{ fontSize: 48, marginBottom: 8 }}>
-            {isCompleted ? '✅' : '⚠️'}
-          </div>
+          <div style={{ fontSize: 48, marginBottom: 8 }}>{isCompleted ? '✅' : '⚠️'}</div>
           <h2 style={{ fontSize: 24, fontWeight: 700, marginBottom: 4 }}>
             {isCompleted ? 'Завершено' : 'Прервано'}
           </h2>
-          <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>
-            {snap.name}
-          </p>
+          <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>{snap.name}</p>
         </div>
 
-        {/* Date/time */}
         <div className="card" style={{ padding: '0 16px', marginBottom: 16 }}>
           <StatRow label="Начало" value={formatDate(session.startedAt)} />
           {session.endedAt && (
@@ -68,48 +71,33 @@ export function SessionDetailScreen() {
               <StatRow label="Конец" value={formatDate(session.endedAt)} />
             </>
           )}
-        </div>
-
-        {/* Performance */}
-        <div className="card" style={{ padding: '0 16px', marginBottom: 16 }}>
-          <StatRow
-            label="Циклов выполнено"
-            value={`${session.completedCycles} из ${session.plannedCycles}`}
-          />
-          <div className="divider" />
-          <StatRow label="🔥 Горячая вода" value={formatDur(session.actualHotSec)} color="var(--color-hot)" />
-          <div className="divider" />
-          <StatRow label="❄️ Холодная вода" value={formatDur(session.actualColdSec)} color="var(--color-cold)" />
-          {session.actualBreakSec > 0 && (
+          {session.feelingAfter && (
             <>
               <div className="divider" />
-              <StatRow label="⏸ Паузы" value={formatDur(session.actualBreakSec)} color="var(--color-break)" />
+              <StatRow label="Самочувствие" value={feelingLabel(session.feelingAfter) || '—'} />
             </>
           )}
-          <div className="divider" />
-          <StatRow label="⏱ Итого" value={formatDur(session.totalActualSec)} />
         </div>
 
-        {/* Preset info */}
+        <div className="card" style={{ padding: '0 16px', marginBottom: 16 }}>
+          <StatRow label="Шагов выполнено" value={`${session.completedCycles} из ${session.plannedCycles}`} />
+          <div className="divider" />
+          <StatRow label="Горячая вода" value={formatDuration(session.actualHotSec)} color="var(--color-hot)" />
+          <div className="divider" />
+          <StatRow label="Холодная вода" value={formatDuration(session.actualColdSec)} color="var(--color-cold)" />
+          <div className="divider" />
+          <StatRow label="Итого" value={formatDuration(session.totalActualSec)} />
+        </div>
+
         <div className="card" style={{ padding: '0 16px', marginBottom: 16 }}>
           <p style={{ padding: '12px 0 4px', color: 'var(--text-secondary)', fontSize: 13 }}>
             Параметры режима
           </p>
-          {snap.hotDurationSec !== undefined && (
-            <StatRow label="Горячая (план)" value={`${snap.hotDurationSec} сек`} color="var(--color-hot)" />
-          )}
-          {snap.coldDurationSec !== undefined && (
-            <>
-              <div className="divider" />
-              <StatRow label="Холодная (план)" value={`${snap.coldDurationSec} сек`} color="var(--color-cold)" />
-            </>
-          )}
-          {snap.cyclesCount !== undefined && (
-            <>
-              <div className="divider" />
-              <StatRow label="Циклов (план)" value={String(snap.cyclesCount)} />
-            </>
-          )}
+          <StatRow label="Горячая (план)" value={`${snap.hotDurationSec} сек`} color="var(--color-hot)" />
+          <div className="divider" />
+          <StatRow label="Холодная (план)" value={`${snap.coldDurationSec} сек`} color="var(--color-cold)" />
+          <div className="divider" />
+          <StatRow label="Шагов (план)" value={String(snap.steps.length)} />
         </div>
 
         <button className="btn btn-secondary" onClick={goBack}>

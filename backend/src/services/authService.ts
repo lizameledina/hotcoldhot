@@ -70,6 +70,7 @@ export async function authenticateUser(initData: string) {
           soundEnabled: true,
           vibrationEnabled: true,
           theme: 'SYSTEM',
+          dailyGoalSessions: 1,
         },
       },
     },

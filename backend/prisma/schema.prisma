@@ -19,6 +19,7 @@ model User {
   settings   UserSettings?
   presets    Preset[]
   sessions   Session[]
+  hiddenSystemPresets HiddenSystemPreset[]
 }
 
 model UserSettings {
@@ -27,6 +28,7 @@ model UserSettings {
   soundEnabled     Boolean  @default(true)
   vibrationEnabled Boolean  @default(true)
   theme            Theme    @default(SYSTEM)
+  dailyGoalSessions Int     @default(1)
 
   // Streaks (updated on session complete)
   currentStreak      Int      @default(0)
@@ -51,19 +53,40 @@ model Preset {
   id               String   @id @default(cuid())
   userId           String?
   name             String
+  protocol         Json?
   hotDurationSec   Int
   coldDurationSec  Int
   breakDurationSec Int      @default(0)
   cyclesCount      Int
   isSystem         Boolean  @default(false)
+  progressionEnabled      Boolean   @default(false)
+  increaseStepSec         Int?
+  increaseEveryNDays      Int?
+  maxColdDurationSec      Int?
+  lastProgressionAppliedAt DateTime?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
   user     User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
   sessions Session[]
+  hiddenBy HiddenSystemPreset[]
 
   @@index([userId])
   @@index([isSystem])
+}
+
+model HiddenSystemPreset {
+  id        String   @id @default(cuid())
+  userId    String
+  presetId  String
+  createdAt DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  preset  Preset @relation(fields: [presetId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, presetId])
+  @@index([userId])
+  @@index([presetId])
 }
 
 model Session {
@@ -72,6 +95,7 @@ model Session {
   presetId        String?
   presetSnapshot  Json
   status          SessionStatus @default(COMPLETED)
+  feelingAfter    FeelingAfter?
   startedAt       DateTime
   endedAt         DateTime?
   completedCycles Int           @default(0)
@@ -92,4 +116,10 @@ model Session {
 enum SessionStatus {
   COMPLETED
   INTERRUPTED
+}
+
+enum FeelingAfter {
+  ENERGIZED
+  NORMAL
+  HARD
 }

@@ -7,7 +7,9 @@ export function PresetsScreen() {
   const { system, user: userPresets, isLoading, fetch, remove } = usePresetsStore()
   const { navigate, navigateToEdit, goBack } = useNavigationStore()
 
-  useEffect(() => { fetch() }, [fetch])
+  useEffect(() => {
+    fetch()
+  }, [fetch])
 
   async function handleDelete(preset: Preset) {
     if (window.confirm(`Удалить режим "${preset.name}"?`)) {
@@ -20,12 +22,8 @@ export function PresetsScreen() {
       <div className="topbar">
         <button className="back-btn" onClick={goBack}>‹</button>
         <span className="topbar-title">Режимы</span>
-        <button
-          className="btn btn-primary btn-sm"
-          style={{ width: 'auto', padding: '8px 16px' }}
-          onClick={() => navigate('create-preset')}
-        >
-          + Создать
+        <button className="btn btn-primary btn-sm" style={{ width: 'auto', padding: '8px 16px' }} onClick={() => navigate('create-preset')}>
+          Создать
         </button>
       </div>
 
@@ -34,31 +32,26 @@ export function PresetsScreen() {
           <div className="loading">Загрузка...</div>
         ) : (
           <>
-            <SectionTitle>Системные</SectionTitle>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 24 }}>
-              {system.map((p) => (
-                <PresetCard key={p.id} preset={p} onDelete={undefined} onEdit={undefined} />
-              ))}
-            </div>
-
             <SectionTitle>Мои режимы</SectionTitle>
             {userPresets.length === 0 ? (
-              <div className="empty-state">
-                <div className="empty-state-icon">🚿</div>
-                <p className="empty-state-text">Нет пользовательских режимов.<br />Создайте свой!</p>
+              <div className="empty-state" style={{ paddingTop: 36, paddingBottom: 36 }}>
+                <div className="empty-state-icon">＋</div>
+                <p className="empty-state-text">Нет пользовательских режимов.<br />Создайте свой.</p>
               </div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {userPresets.map((p) => (
-                  <PresetCard
-                    key={p.id}
-                    preset={p}
-                    onEdit={() => navigateToEdit(p)}
-                    onDelete={() => handleDelete(p)}
-                  />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
+                {userPresets.map((preset) => (
+                  <PresetCard key={preset.id} preset={preset} onEdit={() => navigateToEdit(preset)} onDelete={() => handleDelete(preset)} />
                 ))}
               </div>
             )}
+
+            <SectionTitle>Системные</SectionTitle>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {system.map((preset) => (
+                <PresetCard key={preset.id} preset={preset} onDelete={() => handleDelete(preset)} />
+              ))}
+            </div>
           </>
         )}
       </div>
@@ -67,18 +60,7 @@ export function PresetsScreen() {
 }
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
-  return (
-    <h3 style={{
-      fontSize: 13,
-      fontWeight: 600,
-      color: 'var(--text-secondary)',
-      textTransform: 'uppercase',
-      letterSpacing: 0.8,
-      marginBottom: 10,
-    }}>
-      {children}
-    </h3>
-  )
+  return <h3 className="type-caption" style={{ textTransform: 'uppercase', marginBottom: 10 }}>{children}</h3>
 }
 
 function PresetCard({
@@ -87,71 +69,85 @@ function PresetCard({
   onDelete,
 }: {
   preset: Preset
-  onEdit: (() => void) | undefined
-  onDelete: (() => void) | undefined
+  onEdit?: () => void
+  onDelete?: () => void
 }) {
+  const totalDuration = preset.steps.reduce((sum, step) => sum + step.durationSec, 0)
+
   return (
-    <div className="card" style={{ padding: '14px 16px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+    <div className="card" style={{ padding: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 17, fontWeight: 600, marginBottom: 4 }}>{preset.name}</div>
-          <div style={{ display: 'flex', gap: 12, fontSize: 13, color: 'var(--text-secondary)' }}>
-            <span style={{ color: 'var(--color-hot)' }}>🔥 {preset.hotDurationSec}с</span>
-            <span style={{ color: 'var(--color-cold)' }}>❄️ {preset.coldDurationSec}с</span>
-            {preset.breakDurationSec > 0 && <span>⏸ {preset.breakDurationSec}с</span>}
-            <span>× {preset.cyclesCount}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+            <div className="type-section">{preset.name}</div>
+            {preset.isSystem && (
+              <span className="type-caption" style={{ background: 'rgba(138, 143, 152, 0.12)', padding: '4px 8px', borderRadius: 10 }}>
+                системный
+              </span>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+            <MetaPill label={`Всего ${formatDuration(totalDuration)}`} tone="warm" />
+            <MetaPill label={`${preset.steps.length} ${pluralSteps(preset.steps.length)}`} tone="neutral" />
           </div>
         </div>
-        {!preset.isSystem && (
-          <div style={{ display: 'flex', gap: 6 }}>
-            {onEdit && (
-              <button
-                onClick={onEdit}
-                style={{
-                  background: 'rgba(74,158,255,0.1)',
-                  border: '1px solid rgba(74,158,255,0.2)',
-                  borderRadius: 8,
-                  padding: '6px 10px',
-                  color: 'var(--color-cold)',
-                  fontSize: 13,
-                  cursor: 'pointer',
-                }}
-              >
-                Изм.
-              </button>
-            )}
-            {onDelete && (
-              <button
-                onClick={onDelete}
-                style={{
-                  background: 'rgba(255,59,48,0.1)',
-                  border: '1px solid rgba(255,59,48,0.2)',
-                  borderRadius: 8,
-                  padding: '6px 10px',
-                  color: '#ff453a',
-                  fontSize: 13,
-                  cursor: 'pointer',
-                }}
-              >
-                Удал.
-              </button>
-            )}
-          </div>
-        )}
+
+        <div style={{ display: 'flex', gap: 6 }}>
+          {!preset.isSystem && onEdit && (
+            <button onClick={onEdit} className="btn btn-secondary btn-sm" style={{ width: 'auto', padding: '8px 12px' }}>
+              Изм.
+            </button>
+          )}
+          {onDelete && (
+            <button
+              onClick={onDelete}
+              className="btn btn-sm"
+              style={{ width: 'auto', padding: '8px 12px', background: 'rgba(255, 90, 47, 0.08)', color: 'var(--color-hot)', border: '1px solid rgba(255, 90, 47, 0.18)' }}
+            >
+              Удал.
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Summary bar */}
-      <div style={{ marginTop: 10, height: 4, borderRadius: 2, display: 'flex', overflow: 'hidden', gap: 2 }}>
-        {Array.from({ length: preset.cyclesCount }).map((_, i) => (
-          <React.Fragment key={i}>
-            <div style={{ flex: preset.hotDurationSec, background: 'var(--color-hot)', borderRadius: 2 }} />
-            <div style={{ flex: preset.coldDurationSec, background: 'var(--color-cold)', borderRadius: 2 }} />
-            {preset.breakDurationSec > 0 && (
-              <div style={{ flex: preset.breakDurationSec, background: 'var(--color-break)', borderRadius: 2 }} />
-            )}
-          </React.Fragment>
+      <div style={{ marginTop: 8, display: 'grid', gap: 6 }}>
+        {preset.steps.slice(0, 4).map((step) => (
+          <div key={step.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ width: 6, height: 24, borderRadius: 999, background: step.type === 'hot' ? 'var(--color-hot)' : 'var(--color-cold)', flexShrink: 0 }} />
+            <div className="type-body" style={{ fontWeight: 500 }}>{step.type === 'hot' ? 'Горячая вода' : 'Холодная вода'}</div>
+            <div className="type-secondary numeric-tabular" style={{ marginLeft: 'auto' }}>{formatDuration(step.durationSec)}</div>
+          </div>
         ))}
       </div>
     </div>
   )
+}
+
+function MetaPill({ label, tone }: { label: string; tone: 'warm' | 'cold' | 'neutral' }) {
+  const style =
+    tone === 'warm'
+      ? { background: 'var(--color-hot-bg)', color: 'var(--color-hot)' }
+      : tone === 'cold'
+        ? { background: 'var(--color-cold-bg)', color: 'var(--color-cold)' }
+        : { background: 'rgba(138, 143, 152, 0.12)', color: 'var(--text-secondary)' }
+
+  return (
+    <span className="type-secondary" style={{ ...style, display: 'inline-flex', padding: '6px 10px', borderRadius: 10 }}>
+      {label}
+    </span>
+  )
+}
+
+function formatDuration(sec: number): string {
+  if (sec < 60) return `${sec} с`
+  const minutes = Math.floor(sec / 60)
+  const seconds = sec % 60
+  return seconds > 0 ? `${minutes}:${String(seconds).padStart(2, '0')}` : `${minutes}:00`
+}
+
+function pluralSteps(value: number): string {
+  if (value % 10 === 1 && value % 100 !== 11) return 'шаг'
+  if (value % 10 >= 2 && value % 10 <= 4 && (value % 100 < 10 || value % 100 >= 20)) return 'шага'
+  return 'шагов'
 }

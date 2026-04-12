@@ -4,16 +4,16 @@ import { sessionsApi } from '../api'
 import type { Session } from '../types'
 
 function formatDate(iso: string): string {
-  const d = new Date(iso)
-  return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })
+  const date = new Date(iso)
+  return date.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
 function formatTime(iso: string): string {
-  const d = new Date(iso)
-  return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+  const date = new Date(iso)
+  return date.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
 }
 
-function formatDur(sec: number): string {
+function formatDuration(sec: number): string {
   if (sec < 60) return `${sec}с`
   return `${Math.floor(sec / 60)}м ${sec % 60}с`
 }
@@ -42,7 +42,7 @@ export function HistoryScreen() {
     setLoadingMore(true)
     try {
       const data = await sessionsApi.getAll(page + 1)
-      setSessions((s) => [...s, ...data.sessions])
+      setSessions((current) => [...current, ...data.sessions])
       setPage(page + 1)
     } finally {
       setLoadingMore(false)
@@ -54,9 +54,7 @@ export function HistoryScreen() {
       <div className="topbar">
         <button className="back-btn" onClick={goBack}>‹</button>
         <span className="topbar-title">История</span>
-        {total > 0 && (
-          <span style={{ color: 'var(--text-secondary)', fontSize: 14 }}>{total} сессий</span>
-        )}
+        {total > 0 && <span style={{ color: 'var(--text-secondary)', fontSize: 14 }}>{total} сессий</span>}
       </div>
 
       <div className="screen" style={{ paddingTop: 8 }}>
@@ -65,66 +63,61 @@ export function HistoryScreen() {
         ) : sessions.length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-icon">🚿</div>
-            <p className="empty-state-text">Ещё не было ни одной сессии.<br />Начните прямо сейчас!</p>
+            <p className="empty-state-text">Ещё не было ни одной сессии.<br />Начните прямо сейчас.</p>
           </div>
         ) : (
           <>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {sessions.map((s) => (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {sessions.map((session) => (
                 <button
-                  key={s.id}
-                  onClick={() => navigateToSessionDetail(s)}
+                  key={session.id}
+                  onClick={() => navigateToSessionDetail(session)}
+                  className="card"
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    padding: '14px 16px',
-                    background: 'var(--bg-card)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 12,
+                    padding: '15px 16px',
                     cursor: 'pointer',
                     textAlign: 'left',
                     width: '100%',
                     gap: 12,
                   }}
                 >
-                  <div style={{
-                    width: 40,
-                    height: 40,
-                    borderRadius: '50%',
-                    background: s.status === 'COMPLETED' ? 'rgba(74,158,255,0.15)' : 'rgba(139,143,168,0.15)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: 20,
-                    flexShrink: 0,
-                  }}>
-                    {s.status === 'COMPLETED' ? '✅' : '⚠️'}
+                  <div
+                    style={{
+                      width: 42,
+                      height: 42,
+                      borderRadius: '50%',
+                      background: session.status === 'COMPLETED' ? 'var(--surface-cold)' : 'rgba(180, 174, 168, 0.14)',
+                      color: session.status === 'COMPLETED' ? 'var(--color-cold)' : 'var(--text-secondary)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 20,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {session.status === 'COMPLETED' ? '✓' : '–'}
                   </div>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 2 }}>
-                      {(s.presetSnapshot as { name?: string })?.name ?? 'Без названия'}
+                    <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 3 }}>
+                      {(session.presetSnapshot as { name?: string })?.name ?? 'Без названия'}
                     </div>
                     <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-                      {formatDate(s.startedAt)} · {formatTime(s.startedAt)} · {formatDur(s.totalActualSec)}
+                      {formatDate(session.startedAt)} · {formatTime(session.startedAt)} · {formatDuration(session.totalActualSec)}
                     </div>
                   </div>
                   <div style={{ textAlign: 'right', flexShrink: 0 }}>
                     <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-                      {s.completedCycles}/{s.plannedCycles} цикл.
+                      {session.completedCycles}/{session.plannedCycles}
                     </div>
                   </div>
-                  <span style={{ color: 'var(--text-muted)' }}>›</span>
                 </button>
               ))}
             </div>
 
             {sessions.length < total && (
-              <button
-                className="btn btn-secondary"
-                style={{ marginTop: 16 }}
-                onClick={loadMore}
-                disabled={loadingMore}
-              >
+              <button className="btn btn-secondary" style={{ marginTop: 16 }} onClick={loadMore} disabled={loadingMore}>
                 {loadingMore ? 'Загрузка...' : 'Загрузить ещё'}
               </button>
             )}

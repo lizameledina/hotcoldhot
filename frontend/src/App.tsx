@@ -20,37 +20,43 @@ export default function App() {
   const { isAuthenticated, setAuth, setLoading, setError, token } = useAuthStore()
   const { screen } = useNavigationStore()
   const { editingPreset } = useNavigationStore()
-  const { theme } = useSettingsStore()
+  const { theme, syncFromServer } = useSettingsStore()
   const { active } = useSessionStore()
   const { tg, initData, isInTelegram } = useTelegram()
   const [bootstrapping, setBootstrapping] = useState(true)
+  const { user } = useAuthStore()
 
   // Apply theme to root
   useEffect(() => {
     const root = document.documentElement
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-    const isDark = theme === 'DARK' || (theme === 'SYSTEM' && prefersDark)
-    if (!isDark) {
-      // Light theme overrides
-      root.style.setProperty('--bg-primary', '#f2f2f7')
-      root.style.setProperty('--bg-secondary', '#ffffff')
-      root.style.setProperty('--bg-card', '#ffffff')
-      root.style.setProperty('--bg-card-hover', '#f5f5f5')
-      root.style.setProperty('--text-primary', '#000000')
-      root.style.setProperty('--text-secondary', '#6c6c80')
-      root.style.setProperty('--text-muted', '#a0a0af')
-      root.style.setProperty('--border', 'rgba(0,0,0,0.1)')
-    } else {
-      root.style.removeProperty('--bg-primary')
-      root.style.removeProperty('--bg-secondary')
-      root.style.removeProperty('--bg-card')
-      root.style.removeProperty('--bg-card-hover')
-      root.style.removeProperty('--text-primary')
-      root.style.removeProperty('--text-secondary')
-      root.style.removeProperty('--text-muted')
-      root.style.removeProperty('--border')
+    const palette = {
+      '--color-hot': '#FF5A2F',
+      '--color-hot-bg': 'rgba(255, 90, 47, 0.12)',
+      '--color-cold': '#2F6BFF',
+      '--color-cold-bg': 'rgba(47, 107, 255, 0.12)',
+      '--color-break': '#8A8F98',
+      '--color-break-bg': 'rgba(138, 143, 152, 0.14)',
+      '--bg-primary': '#FFFFFF',
+      '--bg-secondary': '#F7F8FB',
+      '--bg-card': '#FFFFFF',
+      '--bg-card-hover': '#F7F8FB',
+      '--text-primary': '#0F1115',
+      '--text-secondary': '#4D5360',
+      '--text-muted': '#8A8F98',
+      '--border': 'rgba(15, 17, 21, 0.1)',
+      '--surface-warm': 'rgba(255, 177, 153, 0.3)',
+      '--surface-cold': 'rgba(167, 200, 255, 0.3)',
+      '--shadow-soft': '0 8px 24px rgba(15, 17, 21, 0.04)',
     }
+
+    Object.entries(palette).forEach(([key, value]) => {
+      root.style.setProperty(key, value)
+    })
   }, [theme])
+
+  useEffect(() => {
+    syncFromServer(user?.settings)
+  }, [syncFromServer, user?.settings])
 
   // Bootstrap: init Telegram and authenticate
   useEffect(() => {

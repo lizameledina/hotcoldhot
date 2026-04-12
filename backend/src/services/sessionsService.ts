@@ -1,9 +1,12 @@
+import { FeelingAfter, SessionStatus } from '@prisma/client'
 import { prisma } from '../lib/prisma'
-import { SessionStatus } from '@prisma/client'
+import { calculatePresetProgression } from './progressionService'
+import { getProtocolSteps, summarizeProtocol, updateLastColdStep } from './protocolService'
 import { recalcAndStoreStreak } from './statsService'
 
 interface PresetSnapshot {
   name: string
+  steps: ReturnType<typeof getProtocolSteps>
   hotDurationSec: number
   coldDurationSec: number
   breakDurationSec: number
@@ -12,35 +15,41 @@ interface PresetSnapshot {
 }
 
 export async function startSession(userId: string, presetId: string) {
-  let preset = await prisma.preset.findFirst({
+  const preset = await prisma.preset.findFirst({
     where: {
       id: presetId,
       OR: [{ userId }, { isSystem: true }],
+      hiddenBy: {
+        none: {
+          userId,
+        },
+      },
     },
   })
 
   if (!preset) throw new Error('Preset not found')
 
+  const steps = getProtocolSteps(preset)
+  const summary = summarizeProtocol(steps)
   const snapshot: PresetSnapshot = {
     name: preset.name,
-    hotDurationSec: preset.hotDurationSec,
-    coldDurationSec: preset.coldDurationSec,
-    breakDurationSec: preset.breakDurationSec,
-    cyclesCount: preset.cyclesCount,
+    steps,
+    hotDurationSec: summary.hotDurationSec,
+    coldDurationSec: summary.coldDurationSec,
+    breakDurationSec: summary.breakDurationSec,
+    cyclesCount: summary.cyclesCount,
   }
 
-  const session = await prisma.session.create({
+  return prisma.session.create({
     data: {
       userId,
       presetId: preset.id,
       presetSnapshot: JSON.parse(JSON.stringify(snapshot)),
       startedAt: new Date(),
-      plannedCycles: preset.cyclesCount,
+      plannedCycles: steps.length,
       status: 'COMPLETED',
     },
   })
-
-  return session
 }
 
 export async function finishSession(
@@ -54,32 +63,101 @@ export async function finishSession(
     actualBreakSec: number
   }
 ) {
+  const existingSession = await prisma.session.findFirst({
+    where: { id: sessionId, userId },
+    include: { preset: true },
+  })
+  if (!existingSession) throw new Error('Session not found')
+
+  const totalActualSec = data.actualHotSec + data.actualColdSec + data.actualBreakSec
+  const finishedAt = new Date()
+
+  const result = await prisma.$transaction(async (tx) => {
+    const updatedSession = await tx.session.update({
+      where: { id: sessionId },
+      data: {
+        status: data.status as SessionStatus,
+        endedAt: finishedAt,
+        completedCycles: data.completedCycles,
+        actualHotSec: data.actualHotSec,
+        actualColdSec: data.actualColdSec,
+        actualBreakSec: data.actualBreakSec,
+        totalActualSec,
+      },
+    })
+
+    let progression:
+      | {
+          applied: true
+          newColdDurationSec: number
+        }
+      | null = null
+
+    if (data.status === 'COMPLETED' && existingSession.preset && !existingSession.preset.isSystem) {
+      const steps = getProtocolSteps(existingSession.preset)
+      const currentColdDurationSec =
+        [...steps].reverse().find((step) => step.type === 'cold')?.durationSec ?? existingSession.preset.coldDurationSec
+
+      const progressionResult = calculatePresetProgression(
+        {
+          coldDurationSec: currentColdDurationSec,
+          progressionEnabled: existingSession.preset.progressionEnabled,
+          increaseStepSec: existingSession.preset.increaseStepSec,
+          increaseEveryNDays: existingSession.preset.increaseEveryNDays,
+          maxColdDurationSec: existingSession.preset.maxColdDurationSec,
+          lastProgressionAppliedAt: existingSession.preset.lastProgressionAppliedAt,
+          updatedAt: existingSession.preset.updatedAt,
+        },
+        finishedAt
+      )
+
+      if (progressionResult.applied) {
+        const updatedSteps = updateLastColdStep(steps, progressionResult.nextColdDurationSec)
+        const summary = summarizeProtocol(updatedSteps)
+
+        await tx.preset.update({
+          where: { id: existingSession.preset.id },
+          data: {
+            protocol: JSON.parse(JSON.stringify({ version: 2, steps: updatedSteps })),
+            coldDurationSec: progressionResult.nextColdDurationSec,
+            hotDurationSec: summary.hotDurationSec,
+            breakDurationSec: summary.breakDurationSec,
+            cyclesCount: summary.cyclesCount,
+            lastProgressionAppliedAt: progressionResult.appliedAt,
+          },
+        })
+        progression = {
+          applied: true,
+          newColdDurationSec: progressionResult.nextColdDurationSec,
+        }
+      }
+    }
+
+    return { session: updatedSession, progression }
+  })
+
+  if (data.status === 'COMPLETED') {
+    await recalcAndStoreStreak(userId).catch(() => {})
+  }
+
+  return result
+}
+
+export async function saveSessionFeeling(
+  userId: string,
+  sessionId: string,
+  feelingAfter: FeelingAfter | null
+) {
   const session = await prisma.session.findFirst({
     where: { id: sessionId, userId },
   })
   if (!session) throw new Error('Session not found')
+  if (session.status !== 'COMPLETED') throw new Error('Feeling available only for completed sessions')
 
-  const totalActualSec = data.actualHotSec + data.actualColdSec + data.actualBreakSec
-
-  const updated = await prisma.session.update({
+  return prisma.session.update({
     where: { id: sessionId },
-    data: {
-      status: data.status as SessionStatus,
-      endedAt: new Date(),
-      completedCycles: data.completedCycles,
-      actualHotSec: data.actualHotSec,
-      actualColdSec: data.actualColdSec,
-      actualBreakSec: data.actualBreakSec,
-      totalActualSec,
-    },
+    data: { feelingAfter },
   })
-
-  // Recalculate and store streak on completed session
-  if (data.status === 'COMPLETED') {
-    await recalcAndStoreStreak(userId).catch(() => {}) // non-blocking
-  }
-
-  return updated
 }
 
 export async function getSessions(userId: string, page = 1, limit = 20) {

@@ -1,6 +1,15 @@
 import { create } from 'zustand'
-import type { Preset, PresetsData } from '../types'
+import type { Preset, PresetsData, ProtocolStep } from '../types'
 import { presetsApi } from '../api'
+
+type PresetPayload = {
+  name: string
+  steps: ProtocolStep[]
+  progressionEnabled: boolean
+  increaseStepSec: number | null
+  increaseEveryNDays: number | null
+  maxColdDurationSec: number | null
+}
 
 interface PresetsState {
   system: Preset[]
@@ -8,7 +17,7 @@ interface PresetsState {
   isLoading: boolean
   lastPresetId: string | null
   fetch: () => Promise<void>
-  create: (data: Omit<Preset, 'id' | 'isSystem' | 'userId' | 'createdAt'>) => Promise<Preset>
+  create: (data: PresetPayload) => Promise<Preset>
   update: (id: string, data: Partial<Omit<Preset, 'id' | 'isSystem'>>) => Promise<void>
   remove: (id: string) => Promise<void>
   setLastPreset: (id: string) => void
@@ -33,26 +42,30 @@ export const usePresetsStore = create<PresetsState>((set, get) => ({
 
   create: async (data) => {
     const preset = await presetsApi.create(data)
-    set((s) => ({ user: [preset, ...s.user] }))
+    set((state) => ({ user: [preset, ...state.user] }))
     return preset
   },
 
   update: async (id, data) => {
     const updated = await presetsApi.update(id, data)
-    set((s) => ({
-      user: s.user.map((p) => (p.id === id ? updated : p)),
+    set((state) => ({
+      user: state.user.map((preset) => (preset.id === id ? updated : preset)),
     }))
   },
 
   remove: async (id) => {
     await presetsApi.delete(id)
-    set((s) => ({ user: s.user.filter((p) => p.id !== id) }))
+    set((state) => ({
+      user: state.user.filter((preset) => preset.id !== id),
+      system: state.system.filter((preset) => preset.id !== id),
+      lastPresetId: state.lastPresetId === id ? null : state.lastPresetId,
+    }))
   },
 
   setLastPreset: (id) => set({ lastPresetId: id }),
 
   getById: (id) => {
-    const s = get()
-    return s.system.find((p) => p.id === id) || s.user.find((p) => p.id === id)
+    const state = get()
+    return state.system.find((preset) => preset.id === id) || state.user.find((preset) => preset.id === id)
   },
 }))

@@ -16,7 +16,7 @@ settingsRouter.get('/', async (req: AuthRequest, res: Response) => {
 
 settingsRouter.patch('/', async (req: AuthRequest, res: Response) => {
   try {
-    const { soundEnabled, vibrationEnabled, theme, reminderEnabled, reminderTime } = req.body
+    const { soundEnabled, vibrationEnabled, theme, reminderEnabled, reminderTime, dailyGoalSessions } = req.body
 
     const settings = await updateSettings(req.userId!, {
       soundEnabled,
@@ -24,6 +24,7 @@ settingsRouter.patch('/', async (req: AuthRequest, res: Response) => {
       theme,
       reminderEnabled,
       reminderTime,
+      dailyGoalSessions,
     })
     res.json(settings)
   } catch (err) {

@@ -1,12 +1,14 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { ActiveSessionState, Phase, Preset } from '../types'
+import type { ActiveSessionState, Phase, Preset, ProtocolStep } from '../types'
 
 const STORAGE_KEY = 'active-session'
+const PREP_DURATION_MS = 10000
 
 interface SessionStore {
   active: ActiveSessionState | null
   resultSessionId: string | null
+  resultProgression: { newColdDurationSec: number } | null
   initSession: (sessionId: string, preset: Preset) => void
   tick: () => { phaseCompleted: boolean; sessionCompleted: boolean }
   pause: () => void
@@ -17,34 +19,28 @@ interface SessionStore {
   getPhaseTotal: () => number
   clearSession: () => void
   setResultSessionId: (id: string | null) => void
+  setResultProgression: (value: { newColdDurationSec: number } | null) => void
+  clearResultMeta: () => void
 }
 
-// Phase sequence per cycle: hot → (break) → cold
-// Between cycles: cold → (break) → hot
-// After last cold: session ends (no trailing break)
-function getNextPhase(current: Phase, prevPhase: Phase | null, preset: Preset): Phase | null {
-  if (current === 'hot') {
-    return preset.breakDurationSec > 0 ? 'break' : 'cold'
-  }
-  if (current === 'break') {
-    // break after hot → go to cold; break after cold → go to hot (new cycle)
-    return prevPhase === 'hot' ? 'cold' : 'hot'
-  }
-  // cold: cycle-end logic is handled in tick/skipPhase
-  return null
+function getCurrentStep(preset: Preset, currentStepIndex: number): ProtocolStep | null {
+  return preset.steps[currentStepIndex] ?? null
 }
 
-function getPhaseDuration(phase: Phase, preset: Preset): number {
-  if (phase === 'hot') return preset.hotDurationSec * 1000
-  if (phase === 'cold') return preset.coldDurationSec * 1000
-  return preset.breakDurationSec * 1000
+function getStepPhase(step: ProtocolStep | null): Phase {
+  return step?.type === 'cold' ? 'cold' : 'hot'
+}
+
+function getStepDuration(step: ProtocolStep | null, phase?: Phase): number {
+  if (phase === 'prepare') return PREP_DURATION_MS
+  return Math.max(0, (step?.durationSec ?? 0) * 1000)
 }
 
 function accumulatePhaseTime(state: ActiveSessionState, elapsed: number): Partial<ActiveSessionState> {
   const sec = Math.floor(elapsed / 1000)
-  if (state.currentPhase === 'hot') return { actualHotSec: state.actualHotSec + sec }
   if (state.currentPhase === 'cold') return { actualColdSec: state.actualColdSec + sec }
-  return { actualBreakSec: state.actualBreakSec + sec }
+  if (state.currentPhase === 'prepare') return {}
+  return { actualHotSec: state.actualHotSec + sec }
 }
 
 export const useSessionStore = create<SessionStore>()(
@@ -52,21 +48,22 @@ export const useSessionStore = create<SessionStore>()(
     (set, get) => ({
       active: null,
       resultSessionId: null,
+      resultProgression: null,
 
       initSession: (sessionId, preset) => {
         const now = Date.now()
+        const firstStep = getCurrentStep(preset, 0)
         const state: ActiveSessionState = {
           sessionId,
           preset,
           startedAt: now,
-          currentPhase: 'hot',
-          prevPhase: null,
-          currentCycle: 1,
+          currentPhase: firstStep ? 'prepare' : getStepPhase(firstStep),
+          currentStepIndex: 0,
           phaseStartedAt: now,
           isPaused: false,
           pausedAt: null,
           pausedRemainingMs: null,
-          completedCycles: 0,
+          completedSteps: 0,
           actualHotSec: 0,
           actualColdSec: 0,
           actualBreakSec: 0,
@@ -75,50 +72,36 @@ export const useSessionStore = create<SessionStore>()(
       },
 
       getRemainingMs: () => {
-        const s = get().active
-        if (!s) return 0
-        if (s.isPaused) return s.pausedRemainingMs ?? 0
-        const total = getPhaseDuration(s.currentPhase, s.preset)
-        const elapsed = Date.now() - s.phaseStartedAt
+        const state = get().active
+        if (!state) return 0
+        if (state.isPaused) return state.pausedRemainingMs ?? 0
+        const total = getStepDuration(getCurrentStep(state.preset, state.currentStepIndex), state.currentPhase)
+        const elapsed = Date.now() - state.phaseStartedAt
         return Math.max(0, total - elapsed)
       },
 
       getPhaseTotal: () => {
-        const s = get().active
-        if (!s) return 0
-        return getPhaseDuration(s.currentPhase, s.preset)
+        const state = get().active
+        if (!state) return 0
+        return getStepDuration(getCurrentStep(state.preset, state.currentStepIndex), state.currentPhase)
       },
 
       tick: () => {
-        const s = get().active
-        if (!s || s.isPaused) return { phaseCompleted: false, sessionCompleted: false }
+        const state = get().active
+        if (!state || state.isPaused) return { phaseCompleted: false, sessionCompleted: false }
 
         const remaining = get().getRemainingMs()
         if (remaining > 0) return { phaseCompleted: false, sessionCompleted: false }
 
-        // Phase completed naturally
-        const phaseElapsed = getPhaseDuration(s.currentPhase, s.preset)
-        const accumulated = accumulatePhaseTime(s, phaseElapsed)
-        const now = Date.now()
+        const currentStep = getCurrentStep(state.preset, state.currentStepIndex)
+        const stepElapsed = getStepDuration(currentStep, state.currentPhase)
 
-        // cold = end of cycle
-        if (s.currentPhase === 'cold') {
-          const newCompleted = s.completedCycles + 1
-          if (newCompleted >= s.preset.cyclesCount) {
-            // Session complete — no trailing break
-            set({ active: { ...s, ...accumulated, completedCycles: newCompleted } })
-            return { phaseCompleted: true, sessionCompleted: true }
-          }
-          // Between cycles: break → hot (or directly hot if no break)
-          const nextPhase: Phase = s.preset.breakDurationSec > 0 ? 'break' : 'hot'
+        if (state.currentPhase === 'prepare') {
           set({
             active: {
-              ...s, ...accumulated,
-              completedCycles: newCompleted,
-              currentCycle: s.currentCycle + 1,
-              currentPhase: nextPhase,
-              prevPhase: 'cold',
-              phaseStartedAt: now,
+              ...state,
+              currentPhase: getStepPhase(currentStep),
+              phaseStartedAt: Date.now(),
               pausedRemainingMs: null,
               pausedAt: null,
             },
@@ -126,32 +109,39 @@ export const useSessionStore = create<SessionStore>()(
           return { phaseCompleted: true, sessionCompleted: false }
         }
 
-        // hot or break: use getNextPhase
-        const nextPhase = getNextPhase(s.currentPhase, s.prevPhase, s.preset)
-        if (nextPhase !== null) {
-          set({
-            active: {
-              ...s, ...accumulated,
-              currentPhase: nextPhase,
-              prevPhase: s.currentPhase,
-              phaseStartedAt: now,
-              pausedRemainingMs: null,
-              pausedAt: null,
-            },
-          })
-          return { phaseCompleted: true, sessionCompleted: false }
+        const accumulated = accumulatePhaseTime(state, stepElapsed)
+        const nextCompleted = state.completedSteps + 1
+
+        if (nextCompleted >= state.preset.steps.length) {
+          set({ active: { ...state, ...accumulated, completedSteps: nextCompleted } })
+          return { phaseCompleted: true, sessionCompleted: true }
         }
 
-        return { phaseCompleted: false, sessionCompleted: false }
+        const nextStepIndex = state.currentStepIndex + 1
+        const nextStep = getCurrentStep(state.preset, nextStepIndex)
+        set({
+          active: {
+            ...state,
+            ...accumulated,
+            completedSteps: nextCompleted,
+            currentStepIndex: nextStepIndex,
+            currentPhase: getStepPhase(nextStep),
+            phaseStartedAt: Date.now(),
+            pausedRemainingMs: null,
+            pausedAt: null,
+          },
+        })
+
+        return { phaseCompleted: true, sessionCompleted: false }
       },
 
       pause: () => {
-        const s = get().active
-        if (!s || s.isPaused) return
+        const state = get().active
+        if (!state || state.isPaused) return
         const remaining = get().getRemainingMs()
         set({
           active: {
-            ...s,
+            ...state,
             isPaused: true,
             pausedAt: Date.now(),
             pausedRemainingMs: remaining,
@@ -160,15 +150,14 @@ export const useSessionStore = create<SessionStore>()(
       },
 
       resume: () => {
-        const s = get().active
-        if (!s || !s.isPaused) return
-        const remaining = s.pausedRemainingMs ?? 0
-        const total = getPhaseDuration(s.currentPhase, s.preset)
-        // Reconstruct phaseStartedAt so that remaining time is correct
+        const state = get().active
+        if (!state || !state.isPaused) return
+        const remaining = state.pausedRemainingMs ?? 0
+        const total = getStepDuration(getCurrentStep(state.preset, state.currentStepIndex), state.currentPhase)
         const fakeStartedAt = Date.now() - (total - remaining)
         set({
           active: {
-            ...s,
+            ...state,
             isPaused: false,
             pausedAt: null,
             pausedRemainingMs: null,
@@ -178,36 +167,24 @@ export const useSessionStore = create<SessionStore>()(
       },
 
       skipPhase: () => {
-        const s = get().active
-        if (!s) return { sessionCompleted: false }
+        const state = get().active
+        if (!state) return { sessionCompleted: false }
 
+        const currentStep = getCurrentStep(state.preset, state.currentStepIndex)
+        const total = getStepDuration(currentStep, state.currentPhase)
         let elapsed: number
-        if (s.isPaused) {
-          const total = getPhaseDuration(s.currentPhase, s.preset)
-          elapsed = total - (s.pausedRemainingMs ?? 0)
+        if (state.isPaused) {
+          elapsed = total - (state.pausedRemainingMs ?? 0)
         } else {
-          elapsed = Date.now() - s.phaseStartedAt
+          elapsed = Date.now() - state.phaseStartedAt
         }
-        elapsed = Math.min(elapsed, getPhaseDuration(s.currentPhase, s.preset))
-        const accumulated = accumulatePhaseTime(s, elapsed)
-        const now = Date.now()
 
-        // cold = end of cycle
-        if (s.currentPhase === 'cold') {
-          const newCompleted = s.completedCycles + 1
-          if (newCompleted >= s.preset.cyclesCount) {
-            set({ active: { ...s, ...accumulated, completedCycles: newCompleted } })
-            return { sessionCompleted: true }
-          }
-          const nextPhase: Phase = s.preset.breakDurationSec > 0 ? 'break' : 'hot'
+        if (state.currentPhase === 'prepare') {
           set({
             active: {
-              ...s, ...accumulated,
-              completedCycles: newCompleted,
-              currentCycle: s.currentCycle + 1,
-              currentPhase: nextPhase,
-              prevPhase: 'cold',
-              phaseStartedAt: now,
+              ...state,
+              currentPhase: getStepPhase(currentStep),
+              phaseStartedAt: Date.now(),
               isPaused: false,
               pausedAt: null,
               pausedRemainingMs: null,
@@ -216,51 +193,60 @@ export const useSessionStore = create<SessionStore>()(
           return { sessionCompleted: false }
         }
 
-        // hot or break
-        const nextPhase = getNextPhase(s.currentPhase, s.prevPhase, s.preset)
-        if (nextPhase !== null) {
-          set({
-            active: {
-              ...s, ...accumulated,
-              currentPhase: nextPhase,
-              prevPhase: s.currentPhase,
-              phaseStartedAt: now,
-              isPaused: false,
-              pausedAt: null,
-              pausedRemainingMs: null,
-            },
-          })
-          return { sessionCompleted: false }
+        const accumulated = accumulatePhaseTime(state, Math.min(elapsed, total))
+        const nextCompleted = state.completedSteps + 1
+
+        if (nextCompleted >= state.preset.steps.length) {
+          set({ active: { ...state, ...accumulated, completedSteps: nextCompleted } })
+          return { sessionCompleted: true }
         }
+
+        const nextStepIndex = state.currentStepIndex + 1
+        const nextStep = getCurrentStep(state.preset, nextStepIndex)
+        set({
+          active: {
+            ...state,
+            ...accumulated,
+            completedSteps: nextCompleted,
+            currentStepIndex: nextStepIndex,
+            currentPhase: getStepPhase(nextStep),
+            phaseStartedAt: Date.now(),
+            isPaused: false,
+            pausedAt: null,
+            pausedRemainingMs: null,
+          },
+        })
 
         return { sessionCompleted: false }
       },
 
       finishEarly: () => {
-        const s = get().active
-        if (!s) return { actualHotSec: 0, actualColdSec: 0, actualBreakSec: 0, completedCycles: 0 }
+        const state = get().active
+        if (!state) return { actualHotSec: 0, actualColdSec: 0, actualBreakSec: 0, completedCycles: 0 }
 
+        const total = getStepDuration(getCurrentStep(state.preset, state.currentStepIndex), state.currentPhase)
         let elapsed: number
-        if (s.isPaused) {
-          const total = getPhaseDuration(s.currentPhase, s.preset)
-          elapsed = total - (s.pausedRemainingMs ?? 0)
+        if (state.isPaused) {
+          elapsed = total - (state.pausedRemainingMs ?? 0)
         } else {
-          elapsed = Date.now() - s.phaseStartedAt
+          elapsed = Date.now() - state.phaseStartedAt
         }
-        elapsed = Math.min(elapsed, getPhaseDuration(s.currentPhase, s.preset))
-        const accumulated = accumulatePhaseTime(s, elapsed)
 
-        const finalState = { ...s, ...accumulated }
+        const accumulated = accumulatePhaseTime(state, Math.min(elapsed, total))
+        const finalState = { ...state, ...accumulated }
+
         return {
           actualHotSec: finalState.actualHotSec,
           actualColdSec: finalState.actualColdSec,
-          actualBreakSec: finalState.actualBreakSec,
-          completedCycles: finalState.completedCycles,
+          actualBreakSec: 0,
+          completedCycles: finalState.completedSteps,
         }
       },
 
       clearSession: () => set({ active: null }),
       setResultSessionId: (id) => set({ resultSessionId: id }),
+      setResultProgression: (value) => set({ resultProgression: value }),
+      clearResultMeta: () => set({ resultSessionId: null, resultProgression: null }),
     }),
     {
       name: STORAGE_KEY,

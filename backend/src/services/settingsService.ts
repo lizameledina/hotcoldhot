@@ -8,6 +8,7 @@ interface SettingsUpdate {
   theme?: 'SYSTEM' | 'LIGHT' | 'DARK'
   reminderEnabled?: boolean
   reminderTime?: string | null
+  dailyGoalSessions?: number
 }
 
 export async function updateSettings(userId: string, data: SettingsUpdate) {
@@ -25,6 +26,12 @@ export async function updateSettings(userId: string, data: SettingsUpdate) {
     }
   }
 
+  if (data.dailyGoalSessions !== undefined) {
+    if (!Number.isInteger(data.dailyGoalSessions) || data.dailyGoalSessions < 1 || data.dailyGoalSessions > 10) {
+      throw new Error('dailyGoalSessions must be an integer between 1 and 10')
+    }
+  }
+
   return prisma.userSettings.upsert({
     where: { userId },
     update: data,
@@ -35,6 +42,7 @@ export async function updateSettings(userId: string, data: SettingsUpdate) {
       theme: data.theme ?? 'SYSTEM',
       reminderEnabled: data.reminderEnabled ?? false,
       reminderTime: data.reminderTime ?? null,
+      dailyGoalSessions: data.dailyGoalSessions ?? 1,
     },
   })
 }

@@ -3,186 +3,156 @@ import { useNavigationStore } from '../store/navigationStore'
 import { useSessionStore } from '../store/sessionStore'
 import { useStatsStore } from '../store/statsStore'
 import { sessionsApi } from '../api'
-import type { Session } from '../types'
+import type { FeelingAfter, Session } from '../types'
 
 function formatDuration(sec: number): string {
   if (sec < 60) return `${sec} сек`
-  const m = Math.floor(sec / 60)
-  const s = sec % 60
-  return s > 0 ? `${m} мин ${s} сек` : `${m} мин`
+  const minutes = Math.floor(sec / 60)
+  const seconds = sec % 60
+  return seconds > 0 ? `${minutes}:${String(seconds).padStart(2, '0')}` : `${minutes}:00`
 }
 
-function pluralDays(n: number): string {
-  if (n % 10 === 1 && n % 100 !== 11) return 'день'
-  if (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20)) return 'дня'
+function pluralDays(count: number): string {
+  if (count % 10 === 1 && count % 100 !== 11) return 'день'
+  if (count % 10 >= 2 && count % 10 <= 4 && (count % 100 < 10 || count % 100 >= 20)) return 'дня'
   return 'дней'
 }
 
+const FEELING_OPTIONS: Array<{ value: FeelingAfter; label: string }> = [
+  { value: 'energized', label: 'Бодро' },
+  { value: 'normal', label: 'Нормально' },
+  { value: 'hard', label: 'Тяжело' },
+]
+
 export function ResultScreen() {
   const { navigate } = useNavigationStore()
-  const { resultSessionId, setResultSessionId } = useSessionStore()
+  const { resultSessionId, resultProgression, clearResultMeta } = useSessionStore()
   const { summary, fetch: fetchStats, invalidate } = useStatsStore()
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
+  const [feeling, setFeeling] = useState<FeelingAfter | null>(null)
+  const [savingFeeling, setSavingFeeling] = useState(false)
+  const [feelingHidden, setFeelingHidden] = useState(false)
 
   useEffect(() => {
     if (!resultSessionId || resultSessionId.startsWith('local_')) {
       setLoading(false)
       return
     }
+
     sessionsApi.getOne(resultSessionId)
-      .then(setSession)
+      .then((data) => {
+        setSession(data)
+        setFeeling(data.feelingAfter)
+      })
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [resultSessionId])
 
-  // Refresh stats when result screen opens (session just finished)
   useEffect(() => {
     invalidate()
     fetchStats()
-  }, [])
-
-  function handleRepeat() {
-    setResultSessionId(null)
-    navigate('session')
-  }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleHome() {
-    setResultSessionId(null)
+    clearResultMeta()
     navigate('home')
   }
 
-  const isCompleted = session?.status === 'COMPLETED'
-  const statusEmoji = isCompleted ? '✅' : '⚠️'
-  const statusLabel = isCompleted ? 'Завершено' : 'Прервано'
-  const statusColor = isCompleted ? 'var(--color-cold)' : 'var(--color-break)'
+  async function handleFeelingSelect(nextFeeling: FeelingAfter) {
+    if (!session || savingFeeling) return
+    setSavingFeeling(true)
+    try {
+      const updated = await sessionsApi.saveFeeling(session.id, nextFeeling)
+      setSession(updated)
+      setFeeling(updated.feelingAfter)
+      invalidate()
+      fetchStats()
+    } catch {
+      alert('Не удалось сохранить самочувствие')
+    } finally {
+      setSavingFeeling(false)
+    }
+  }
 
+  const isCompleted = session?.status === 'COMPLETED'
+  const statusLabel = isCompleted ? 'Завершено' : 'Прервано'
+  const statusColor = isCompleted ? 'var(--color-cold)' : 'var(--text-secondary)'
   const streak = summary?.currentStreak ?? 0
   const todayCompleted = summary?.todayCompleted ?? false
 
   return (
-    <div className="screen fade-in" style={{ display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
-      {/* Status */}
-      <div style={{ textAlign: 'center', padding: '32px 0 24px' }}>
+    <div className="screen fade-in" style={{ display: 'flex', flexDirection: 'column', minHeight: '100%', paddingTop: 18 }}>
+      <div className="card" style={{ padding: 22, textAlign: 'center', marginBottom: 16 }}>
         {loading ? (
-          <div style={{ fontSize: 64, marginBottom: 12 }} className="pulse">🚿</div>
+          <div style={{ fontSize: 56 }} className="pulse">🚿</div>
         ) : (
           <>
-            <div style={{ fontSize: 64, marginBottom: 12 }}>{statusEmoji}</div>
-            <h1 style={{ fontSize: 32, fontWeight: 800, color: statusColor, marginBottom: 8 }}>
-              {statusLabel}
-            </h1>
-            {session && (
-              <p style={{ color: 'var(--text-secondary)', fontSize: 15 }}>
-                {(session.presetSnapshot as { name?: string })?.name}
-              </p>
-            )}
+            <div style={{ width: 64, height: 64, margin: '0 auto 12px', borderRadius: '50%', background: isCompleted ? 'var(--surface-cold)' : 'rgba(138, 143, 152, 0.14)', color: statusColor, display: 'flex', alignItems: 'center', justifyContent: 'center' }} className="type-title">
+              {isCompleted ? '✓' : '–'}
+            </div>
+            <h1 className="type-title" style={{ color: statusColor, marginBottom: 6 }}>{statusLabel}</h1>
+            {session && <p className="type-body text-secondary">{(session.presetSnapshot as { name?: string })?.name}</p>}
           </>
         )}
       </div>
 
-      {/* Streak & goal badges (only for completed sessions) */}
       {isCompleted && summary && (
-        <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
-          <div
-            className="card fade-in"
-            style={{
-              flex: 1,
-              padding: '12px 14px',
-              textAlign: 'center',
-              border: streak > 0 ? '1px solid rgba(255,107,53,0.3)' : '1px solid var(--border)',
-            }}
-          >
-            {streak > 0 ? (
-              <>
-                <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--color-hot)' }}>
-                  🔥 {streak} {pluralDays(streak)}
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>Стрик</div>
-              </>
-            ) : (
-              <>
-                <div style={{ fontSize: 18, fontWeight: 700 }}>🔥 Начало</div>
-                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>Новый стрик</div>
-              </>
-            )}
-          </div>
-
-          {todayCompleted && (
-            <div
-              className="card fade-in"
-              style={{
-                flex: 1,
-                padding: '12px 14px',
-                textAlign: 'center',
-                border: '1px solid rgba(74,158,255,0.3)',
-              }}
-            >
-              <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--color-cold)' }}>🎯</div>
-              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>Цель дня выполнена</div>
-            </div>
-          )}
+        <div style={{ display: 'grid', gridTemplateColumns: todayCompleted ? '1fr 1fr' : '1fr', gap: 10, marginBottom: 16 }}>
+          <SummaryBadge title="Серия" value={streak > 0 ? `${streak} ${pluralDays(streak)}` : 'Новый старт'} tone="warm" />
+          {todayCompleted && <SummaryBadge title="Цель дня" value="Выполнена" tone="cold" />}
         </div>
       )}
 
-      {/* Stats */}
+      {resultProgression && (
+        <div className="card" style={{ padding: 16, marginBottom: 16, background: 'var(--surface-cold)' }}>
+          <p className="type-body text-cold" style={{ fontWeight: 600 }}>Холодная вода увеличена до {resultProgression.newColdDurationSec} сек</p>
+        </div>
+      )}
+
       {!loading && session && (
-        <div className="card fade-in" style={{ padding: '20px', marginBottom: 16 }}>
-          <StatRow label="Выполнено циклов" value={`${session.completedCycles} / ${session.plannedCycles}`} />
+        <div className="card" style={{ padding: 20, marginBottom: 16 }}>
+          <StatRow label="Выполнено шагов" value={`${session.completedCycles} / ${session.plannedCycles}`} />
           <div className="divider" />
-          <StatRow
-            label="🔥 Горячая вода"
-            value={formatDuration(session.actualHotSec)}
-            color="var(--color-hot)"
-          />
+          <StatRow label="Горячая вода" value={formatDuration(session.actualHotSec)} color="var(--color-hot)" />
           <div className="divider" />
-          <StatRow
-            label="❄️ Холодная вода"
-            value={formatDuration(session.actualColdSec)}
-            color="var(--color-cold)"
-          />
-          {session.actualBreakSec > 0 && (
-            <>
-              <div className="divider" />
-              <StatRow
-                label="⏸ Паузы"
-                value={formatDuration(session.actualBreakSec)}
-                color="var(--color-break)"
-              />
-            </>
-          )}
+          <StatRow label="Холодная вода" value={formatDuration(session.actualColdSec)} color="var(--color-cold)" />
           <div className="divider" />
-          <StatRow
-            label="⏱ Общее время"
-            value={formatDuration(session.totalActualSec)}
-          />
+          <StatRow label="Общее время" value={formatDuration(session.totalActualSec)} />
         </div>
       )}
 
-      {loading && (
-        <div className="card" style={{ padding: 24, textAlign: 'center', marginBottom: 16 }}>
-          <p style={{ color: 'var(--text-secondary)' }}>Загрузка...</p>
+      {!loading && session && session.status === 'COMPLETED' && !feelingHidden && (
+        <div className="card" style={{ padding: 16, marginBottom: 16 }}>
+          <p className="type-section" style={{ marginBottom: 6 }}>Как самочувствие после душа?</p>
+          <p className="type-secondary" style={{ marginBottom: 14 }}>Ответ можно изменить позже</p>
+          <div style={{ display: 'grid', gap: 8 }}>
+            {FEELING_OPTIONS.map((option) => (
+              <button key={option.value} className={feeling === option.value ? 'btn btn-primary' : 'btn btn-secondary'} onClick={() => handleFeelingSelect(option.value)} disabled={savingFeeling} style={{ justifyContent: 'space-between' }}>
+                <span>{option.label}</span>
+                {feeling === option.value && <span>✓</span>}
+              </button>
+            ))}
+          </div>
+          <button className="btn btn-ghost" onClick={() => setFeelingHidden(true)} style={{ marginTop: 10 }}>Пропустить</button>
         </div>
       )}
 
-      {!loading && !session && (
-        <div className="card" style={{ padding: 24, textAlign: 'center', marginBottom: 16 }}>
-          <p style={{ color: 'var(--text-secondary)' }}>Данные сессии не сохранены (нет сети)</p>
-        </div>
-      )}
+      {loading && <div className="card" style={{ padding: 24, textAlign: 'center', marginBottom: 16 }}><p className="type-body text-secondary">Загрузка...</p></div>}
+      {!loading && !session && <div className="card" style={{ padding: 24, textAlign: 'center', marginBottom: 16 }}><p className="type-body text-secondary">Данные сессии не сохранены</p></div>}
 
-      {/* Spacer */}
       <div style={{ flex: 1 }} />
+      <button className="btn btn-primary" onClick={handleHome}>На главную</button>
+    </div>
+  )
+}
 
-      {/* Actions */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <button className="btn btn-hot" onClick={handleRepeat}>
-          🔄 Повторить
-        </button>
-        <button className="btn btn-secondary" onClick={handleHome}>
-          На главную
-        </button>
-      </div>
+function SummaryBadge({ title, value, tone }: { title: string; value: string; tone: 'warm' | 'cold' }) {
+  const style = tone === 'warm' ? { background: 'var(--surface-warm)', color: 'var(--color-hot)' } : { background: 'var(--surface-cold)', color: 'var(--color-cold)' }
+  return (
+    <div className="card" style={{ padding: 14 }}>
+      <div className="type-caption" style={{ ...style, display: 'inline-flex', padding: '4px 10px', borderRadius: 999, marginBottom: 10 }}>{title}</div>
+      <p className="type-section">{value}</p>
     </div>
   )
 }
@@ -190,8 +160,8 @@ export function ResultScreen() {
 function StatRow({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0' }}>
-      <span style={{ color: 'var(--text-secondary)', fontSize: 15 }}>{label}</span>
-      <span style={{ fontSize: 15, fontWeight: 600, color: color || 'var(--text-primary)' }}>{value}</span>
+      <span className="type-body text-secondary">{label}</span>
+      <span className="type-body numeric-tabular" style={{ fontWeight: 600, color: color || 'var(--text-primary)' }}>{value}</span>
     </div>
   )
 }

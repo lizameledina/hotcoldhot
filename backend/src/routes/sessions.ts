@@ -1,9 +1,24 @@
 import { Router, Response } from 'express'
+import { FeelingAfter } from '@prisma/client'
 import { authMiddleware, AuthRequest } from '../middleware/auth'
-import { startSession, finishSession, getSessions, getSession } from '../services/sessionsService'
+import {
+  startSession,
+  finishSession,
+  getSessions,
+  getSession,
+  saveSessionFeeling,
+} from '../services/sessionsService'
 
 export const sessionsRouter = Router()
 sessionsRouter.use(authMiddleware)
+
+function parseFeelingAfter(value: unknown): FeelingAfter | null | undefined {
+  if (value === null) return null
+  if (value === 'energized') return FeelingAfter.ENERGIZED
+  if (value === 'normal') return FeelingAfter.NORMAL
+  if (value === 'hard') return FeelingAfter.HARD
+  return undefined
+}
 
 sessionsRouter.post('/start', async (req: AuthRequest, res: Response) => {
   try {
@@ -27,6 +42,7 @@ sessionsRouter.post('/:id/finish', async (req: AuthRequest, res: Response) => {
       res.status(400).json({ error: 'Invalid status' })
       return
     }
+
     const session = await finishSession(req.userId!, req.params.id, {
       status,
       completedCycles: parseInt(completedCycles) || 0,
@@ -38,6 +54,28 @@ sessionsRouter.post('/:id/finish', async (req: AuthRequest, res: Response) => {
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Error'
     res.status(msg === 'Session not found' ? 404 : 500).json({ error: msg })
+  }
+})
+
+sessionsRouter.post('/:id/feeling', async (req: AuthRequest, res: Response) => {
+  try {
+    const feelingAfter = parseFeelingAfter(req.body?.feelingAfter)
+    if (feelingAfter === undefined) {
+      res.status(400).json({ error: 'Invalid feelingAfter' })
+      return
+    }
+
+    const session = await saveSessionFeeling(req.userId!, req.params.id, feelingAfter)
+    res.json(session)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error'
+    const status =
+      msg === 'Session not found'
+        ? 404
+        : msg === 'Feeling available only for completed sessions'
+          ? 400
+          : 500
+    res.status(status).json({ error: msg })
   }
 })
 

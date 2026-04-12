@@ -1,162 +1,372 @@
-import React, { useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import { usePresetsStore } from '../store/presetsStore'
 import { useNavigationStore } from '../store/navigationStore'
-import type { Preset } from '../types'
-
-interface PresetForm {
-  name: string
-  hotDurationSec: string
-  coldDurationSec: string
-  breakDurationSec: string
-  cyclesCount: string
-}
-
-function defaultForm(preset?: Preset): PresetForm {
-  return {
-    name: preset?.name ?? '',
-    hotDurationSec: String(preset?.hotDurationSec ?? 90),
-    coldDurationSec: String(preset?.coldDurationSec ?? 30),
-    breakDurationSec: String(preset?.breakDurationSec ?? 10),
-    cyclesCount: String(preset?.cyclesCount ?? 3),
-  }
-}
+import type { Preset, ProtocolStep, StepType } from '../types'
 
 interface Props {
   editingPreset?: Preset
+}
+
+interface PresetForm {
+  name: string
+  steps: ProtocolStep[]
+}
+
+const MIN_DURATION_SEC = 1
+const DEFAULT_DURATION_SEC = 30
+
+function createStep(partial?: Partial<ProtocolStep>, fallbackType: StepType = 'hot'): ProtocolStep {
+  return {
+    id: partial?.id ?? `step_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    type: partial?.type ?? fallbackType,
+    durationSec: partial?.durationSec ?? DEFAULT_DURATION_SEC,
+  }
+}
+
+function getOppositeType(type: StepType): StepType {
+  return type === 'hot' ? 'cold' : 'hot'
+}
+
+function enforceAlternatingSteps(steps: ProtocolStep[]): ProtocolStep[] {
+  if (steps.length === 0) return steps
+  const firstType = steps[0].type
+
+  return steps.map((step, index) => ({
+    ...step,
+    type: index === 0 ? firstType : index % 2 === 1 ? getOppositeType(firstType) : firstType,
+  }))
+}
+
+function defaultForm(preset?: Preset): PresetForm {
+  const steps = preset?.steps?.length
+    ? preset.steps.map((step) => createStep(step, step.type))
+    : [createStep({ type: 'hot', durationSec: DEFAULT_DURATION_SEC })]
+
+  return {
+    name: preset?.name ?? '',
+    steps: enforceAlternatingSteps(steps),
+  }
+}
+
+function formatDuration(sec: number) {
+  if (sec < 60) return `${sec} с`
+  const minutes = Math.floor(sec / 60)
+  const rest = sec % 60
+  return rest > 0 ? `${minutes}:${String(rest).padStart(2, '0')}` : `${minutes}:00`
+}
+
+function getStepTitle(type: StepType) {
+  return type === 'hot' ? 'Горячая вода' : 'Холодная вода'
+}
+
+function getStepIcon(type: StepType) {
+  return type === 'hot' ? '🔥' : '❄️'
+}
+
+function pluralSteps(value: number): string {
+  if (value % 10 === 1 && value % 100 !== 11) return 'шаг'
+  if (value % 10 >= 2 && value % 10 <= 4 && (value % 100 < 10 || value % 100 >= 20)) return 'шага'
+  return 'шагов'
 }
 
 export function CreatePresetScreen({ editingPreset }: Props) {
   const { create, update } = usePresetsStore()
   const { goBack } = useNavigationStore()
   const [form, setForm] = useState<PresetForm>(defaultForm(editingPreset))
-  const [errors, setErrors] = useState<Partial<PresetForm>>({})
   const [saving, setSaving] = useState(false)
+  const [errors, setErrors] = useState<Record<string, string>>({})
 
-  const isEdit = !!editingPreset
+  const isEdit = Boolean(editingPreset)
+  const totalDurationSec = useMemo(() => form.steps.reduce((sum, step) => sum + step.durationSec, 0), [form.steps])
 
-  function validate(): boolean {
-    const e: Partial<PresetForm> = {}
-    if (!form.name.trim()) e.name = 'Обязательное поле'
-    if (parseInt(form.hotDurationSec) <= 0) e.hotDurationSec = 'Должно быть > 0'
-    if (parseInt(form.coldDurationSec) <= 0) e.coldDurationSec = 'Должно быть > 0'
-    if (parseInt(form.breakDurationSec) < 0) e.breakDurationSec = 'Должно быть ≥ 0'
-    if (parseInt(form.cyclesCount) < 1) e.cyclesCount = 'Должно быть ≥ 1'
-    setErrors(e)
-    return Object.keys(e).length === 0
+  function patchStep(id: string, patch: Partial<ProtocolStep>) {
+    setForm((current) => ({
+      ...current,
+      steps: enforceAlternatingSteps(
+        current.steps.map((step, index) => {
+          if (step.id !== id) return step
+          if (index === 0) return { ...step, ...patch }
+          return { ...step, durationSec: patch.durationSec ?? step.durationSec }
+        })
+      ),
+    }))
+  }
+
+  function addStep() {
+    setForm((current) => {
+      const lastStep = current.steps[current.steps.length - 1]
+      const fallbackType = lastStep ? getOppositeType(lastStep.type) : 'hot'
+      const next = createStep({
+        type: fallbackType,
+        durationSec: lastStep?.durationSec ?? DEFAULT_DURATION_SEC,
+      })
+
+      return {
+        ...current,
+        steps: enforceAlternatingSteps([...current.steps, next]),
+      }
+    })
+  }
+
+  function deleteLastStep() {
+    setForm((current) => ({
+      ...current,
+      steps: enforceAlternatingSteps(current.steps.slice(0, -1)),
+    }))
+  }
+
+  function validate() {
+    const nextErrors: Record<string, string> = {}
+    if (!form.name.trim()) nextErrors.name = 'Укажите название'
+    if (form.steps.length === 0) nextErrors.steps = 'Добавьте хотя бы один шаг'
+
+    form.steps.forEach((step) => {
+      if (step.durationSec < MIN_DURATION_SEC) {
+        nextErrors[`step_${step.id}`] = 'Минимум 1 секунда'
+      }
+    })
+
+    setErrors(nextErrors)
+    return Object.keys(nextErrors).length === 0
   }
 
   async function handleSave() {
     if (!validate()) return
     setSaving(true)
     try {
-      const data = {
+      const payload = {
         name: form.name.trim(),
-        hotDurationSec: parseInt(form.hotDurationSec),
-        coldDurationSec: parseInt(form.coldDurationSec),
-        breakDurationSec: parseInt(form.breakDurationSec) || 0,
-        cyclesCount: parseInt(form.cyclesCount),
+        steps: form.steps,
+        progressionEnabled: false,
+        increaseStepSec: null,
+        increaseEveryNDays: null,
+        maxColdDurationSec: null,
       }
+
       if (isEdit && editingPreset) {
-        await update(editingPreset.id, data)
+        await update(editingPreset.id, payload)
       } else {
-        await create(data)
+        await create(payload)
       }
+
       goBack()
-    } catch (err) {
+    } catch {
       alert('Ошибка сохранения')
     } finally {
       setSaving(false)
     }
   }
 
-  function field(label: string, key: keyof PresetForm, hint?: string) {
-    return (
-      <div className="form-group">
-        <label className="form-label">{label}</label>
-        <input
-          className="form-input"
-          type={key === 'name' ? 'text' : 'number'}
-          inputMode={key === 'name' ? 'text' : 'numeric'}
-          value={form[key]}
-          onChange={(e) => {
-            setForm((f) => ({ ...f, [key]: e.target.value }))
-            setErrors((err) => ({ ...err, [key]: undefined }))
-          }}
-          placeholder={hint}
-        />
-        {errors[key] && (
-          <div style={{ color: '#ff453a', fontSize: 12, marginTop: 4 }}>{errors[key]}</div>
-        )}
-      </div>
-    )
-  }
-
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <div className="topbar">
         <button className="back-btn" onClick={goBack}>‹</button>
-        <span className="topbar-title">{isEdit ? 'Редактировать режим' : 'Новый режим'}</span>
+        <span className="topbar-title">Контрастные переходы</span>
       </div>
 
-      <div className="screen" style={{ paddingTop: 8 }}>
-        {field('Название', 'name', 'Мой режим')}
-
-        <div className="card" style={{ padding: '16px', marginBottom: 16 }}>
-          <p style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 16 }}>
-            Длительность этапов
-          </p>
-          {field('Горячая вода (сек)', 'hotDurationSec', '90')}
-          {field('Холодная вода (сек)', 'coldDurationSec', '30')}
-          {field('Пауза (сек, 0 = без паузы)', 'breakDurationSec', '10')}
+      <div className="screen" style={{ paddingTop: 8, paddingBottom: 132 }}>
+        <div className="card" style={{ padding: 18, marginBottom: 16 }}>
+          <label className="form-label">Название режима</label>
+          <input
+            className="form-input"
+            value={form.name}
+            onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+            placeholder="Мой режим"
+          />
+          {errors.name && <InlineError text={errors.name} />}
         </div>
 
-        {field('Количество циклов', 'cyclesCount', '3')}
-
-        {/* Preview */}
-        <div className="card" style={{ padding: 16, marginBottom: 24 }}>
-          <p style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 10 }}>Предпросмотр</p>
-          <PreviewBar form={form} />
-          <p style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 8 }}>
-            Общее время: ~{estimateTotal(form)} мин
-          </p>
+        <div className="card" style={{ padding: 18, marginBottom: 16 }}>
+          <div className="type-section" style={{ marginBottom: 4 }}>Структура режима</div>
+          <div className="type-secondary numeric-tabular">
+            {form.steps.length} {pluralSteps(form.steps.length)} · {formatDuration(totalDurationSec)}
+          </div>
         </div>
 
+        {form.steps.length === 0 ? (
+          <div className="card" style={{ padding: 24, marginBottom: 16, textAlign: 'center' }}>
+            <div className="type-section" style={{ marginBottom: 8 }}>Добавьте первый шаг</div>
+            <div className="type-body text-secondary" style={{ marginBottom: 16 }}>
+              Соберите простую последовательность горячих и холодных шагов
+            </div>
+            <button className="btn btn-primary" onClick={addStep}>Добавить шаг</button>
+            {errors.steps && <InlineError text={errors.steps} />}
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gap: 10, marginBottom: 16 }}>
+            {form.steps.map((step, index) => (
+              <StepCard
+                key={step.id}
+                step={step}
+                index={index}
+                isFirst={index === 0}
+                isLast={index === form.steps.length - 1}
+                error={errors[`step_${step.id}`]}
+                onPatch={patchStep}
+                onDeleteLast={deleteLastStep}
+              />
+            ))}
+          </div>
+        )}
+
+        <button className="btn btn-secondary" onClick={addStep}>Добавить шаг</button>
+      </div>
+
+      <div
+        style={{
+          position: 'sticky',
+          bottom: 0,
+          padding: '12px 18px calc(12px + var(--safe-bottom))',
+          background: 'linear-gradient(180deg, rgba(255,255,255,0) 0%, var(--bg-primary) 22%)',
+        }}
+      >
         <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-          {saving ? 'Сохранение...' : 'Сохранить'}
-        </button>
-        <button className="btn btn-ghost" onClick={goBack} style={{ marginTop: 8 }}>
-          Отмена
+          {saving ? 'Сохранение...' : 'Сохранить режим'}
         </button>
       </div>
     </div>
   )
 }
 
-function PreviewBar({ form }: { form: PresetForm }) {
-  const hot = parseInt(form.hotDurationSec) || 0
-  const cold = parseInt(form.coldDurationSec) || 0
-  const brk = parseInt(form.breakDurationSec) || 0
-  const cycles = parseInt(form.cyclesCount) || 1
-  const total = (hot + cold + brk) * cycles || 1
+function StepCard({
+  step,
+  index,
+  isFirst,
+  isLast,
+  error,
+  onPatch,
+  onDeleteLast,
+}: {
+  step: ProtocolStep
+  index: number
+  isFirst: boolean
+  isLast: boolean
+  error?: string
+  onPatch: (id: string, patch: Partial<ProtocolStep>) => void
+  onDeleteLast: () => void
+}) {
+  const accent = step.type === 'hot' ? 'var(--color-hot)' : 'var(--color-cold)'
+  const tint = step.type === 'hot' ? 'var(--color-hot-bg)' : 'var(--color-cold-bg)'
+  const canDecrease = step.durationSec > MIN_DURATION_SEC
 
   return (
-    <div style={{ display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', gap: 2 }}>
-      {Array.from({ length: Math.min(cycles, 5) }).map((_, i) => (
-        <React.Fragment key={i}>
-          <div style={{ flex: hot / total, background: 'var(--color-hot)', minWidth: hot > 0 ? 2 : 0 }} />
-          <div style={{ flex: cold / total, background: 'var(--color-cold)', minWidth: cold > 0 ? 2 : 0 }} />
-          {brk > 0 && <div style={{ flex: brk / total, background: 'var(--color-break)', minWidth: 2 }} />}
-        </React.Fragment>
-      ))}
+    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'stretch' }}>
+        <div style={{ width: 5, background: accent, flexShrink: 0 }} />
+        <div style={{ flex: 1, padding: '16px 14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+            <div
+              style={{
+                width: 38,
+                height: 38,
+                borderRadius: 12,
+                background: tint,
+                color: accent,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 18,
+                flexShrink: 0,
+              }}
+            >
+              {getStepIcon(step.type)}
+            </div>
+            <div style={{ flex: 1 }}>
+              <div className="type-body" style={{ fontWeight: 600, marginBottom: isFirst ? 2 : 0 }}>
+                {index + 1}. {getStepTitle(step.type)}
+              </div>
+              {isFirst && <div className="type-secondary">Выберите с чего начать</div>}
+            </div>
+            {isLast && (
+              <button
+                className="btn btn-sm"
+                style={{
+                  width: 36,
+                  height: 36,
+                  padding: 0,
+                  background: 'rgba(255, 90, 47, 0.08)',
+                  color: 'var(--color-hot)',
+                  border: '1px solid rgba(255, 90, 47, 0.18)',
+                }}
+                onClick={onDeleteLast}
+              >
+                ×
+              </button>
+            )}
+          </div>
+
+          {isFirst ? (
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+              <TypeChip label="Горячая" active={step.type === 'hot'} tone="hot" onClick={() => onPatch(step.id, { type: 'hot' })} />
+              <TypeChip label="Холодная" active={step.type === 'cold'} tone="cold" onClick={() => onPatch(step.id, { type: 'cold' })} />
+            </div>
+          ) : null}
+
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <button
+              className="btn btn-secondary btn-sm"
+              style={{ width: 44, height: 44, padding: 0 }}
+              onClick={() => onPatch(step.id, { durationSec: Math.max(MIN_DURATION_SEC, step.durationSec - 5) })}
+              disabled={!canDecrease}
+            >
+              −
+            </button>
+            <input
+              className="form-input numeric-tabular"
+              type="number"
+              min={MIN_DURATION_SEC}
+              value={step.durationSec}
+              onChange={(event) => onPatch(step.id, { durationSec: Math.max(0, parseInt(event.target.value) || 0) })}
+              style={{ textAlign: 'center' }}
+            />
+            <button
+              className="btn btn-secondary btn-sm"
+              style={{ width: 44, height: 44, padding: 0 }}
+              onClick={() => onPatch(step.id, { durationSec: step.durationSec + 5 })}
+            >
+              +
+            </button>
+          </div>
+
+          {error && <InlineError text={error} />}
+        </div>
+      </div>
     </div>
   )
 }
 
-function estimateTotal(form: PresetForm): string {
-  const hot = parseInt(form.hotDurationSec) || 0
-  const cold = parseInt(form.coldDurationSec) || 0
-  const brk = parseInt(form.breakDurationSec) || 0
-  const cycles = parseInt(form.cyclesCount) || 1
-  const totalSec = (hot + cold + brk) * cycles
-  return (totalSec / 60).toFixed(1)
+function TypeChip({
+  label,
+  active,
+  tone,
+  onClick,
+}: {
+  label: string
+  active: boolean
+  tone: 'hot' | 'cold'
+  onClick: () => void
+}) {
+  const styles =
+    tone === 'hot'
+      ? { activeBackground: 'var(--color-hot-bg)', activeColor: 'var(--color-hot)' }
+      : { activeBackground: 'var(--color-cold-bg)', activeColor: 'var(--color-cold)' }
+
+  return (
+    <button
+      className="segmented-chip"
+      onClick={onClick}
+      style={{
+        flex: 1,
+        background: active ? styles.activeBackground : 'var(--bg-tertiary)',
+        color: active ? styles.activeColor : 'var(--text-secondary)',
+        borderColor: active ? 'transparent' : 'var(--border)',
+      }}
+    >
+      {label}
+    </button>
+  )
+}
+
+function InlineError({ text }: { text: string }) {
+  return <div className="type-caption text-warm" style={{ marginTop: 6 }}>{text}</div>
 }
