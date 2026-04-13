@@ -111,15 +111,6 @@ function PresetCard({
         </div>
       </div>
 
-      <div style={{ marginTop: 8, display: 'grid', gap: 6 }}>
-        {preset.steps.slice(0, 4).map((step) => (
-          <div key={step.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ width: 6, height: 24, borderRadius: 999, background: step.type === 'hot' ? 'var(--color-hot)' : 'var(--color-cold)', flexShrink: 0 }} />
-            <div className="type-body" style={{ fontWeight: 500 }}>{step.type === 'hot' ? 'Горячая вода' : 'Холодная вода'}</div>
-            <div className="type-secondary numeric-tabular" style={{ marginLeft: 'auto' }}>{formatDuration(step.durationSec)}</div>
-          </div>
-        ))}
-      </div>
     </div>
   )
 }
